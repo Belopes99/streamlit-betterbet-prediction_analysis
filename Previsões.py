@@ -3,12 +3,17 @@ import pandas as pd
 import plotly.express as px
 from google.cloud import bigquery
 from google.oauth2 import service_account
+import json
+from sklearn.calibration import calibration_curve
+import plotly.graph_objects as go
+import numpy as np
 
 st.set_page_config(page_title="Previsões", page_icon="📊", layout="wide")
 
-CAMINHO_CHAVE = r'C:\Users\belop\OneDrive\Área de Trabalho\BetterBet\Streamlit\betterbet-467621-8f9a111319d9.json'
-credentials = service_account.Credentials.from_service_account_file(CAMINHO_CHAVE)
-project_id = 'betterbet-467621'
+# Lê as credenciais do segredo configurado no Streamlit Cloud
+credentials_info = json.loads(st.secrets["gcp"]["key"])
+credentials = service_account.Credentials.from_service_account_info(credentials_info)
+project_id = credentials_info["project_id"]
 client = bigquery.Client(credentials=credentials, project=project_id)
 
 st.title('Goals 2.5 Analytics - BetterBet')
@@ -40,18 +45,15 @@ with st.sidebar:
     min_date = st.date_input('Data mínima', value=date_min, min_value=date_min, max_value=date_max)
     max_date = st.date_input('Data máxima', value=date_max, min_value=date_min, max_value=date_max)
 
-    # Adicionando filtros numéricos via slider
-    # Filtro para probability
+    # Filtros deslizantes numéricos
     prob_min = float(df['probability'].min())
     prob_max = float(df['probability'].max())
     probability_range = st.slider("Probability (min, max)", min_value=prob_min, max_value=prob_max, value=(prob_min, prob_max), step=0.01)
     
-    # Filtro para odd_goals_over_2_5
     odd_over_min = float(df['odd_goals_over_2_5'].min())
     odd_over_max = float(df['odd_goals_over_2_5'].max())
     odd_over_range = st.slider("Odd Over 2.5 (min, max)", min_value=odd_over_min, max_value=odd_over_max, value=(odd_over_min, odd_over_max), step=0.01)
     
-    # Filtro para odd_goals_under_2_5
     odd_under_min = float(df['odd_goals_under_2_5'].min())
     odd_under_max = float(df['odd_goals_under_2_5'].max())
     odd_under_range = st.slider("Odd Under 2.5 (min, max)", min_value=odd_under_min, max_value=odd_under_max, value=(odd_under_min, odd_under_max), step=0.01)
@@ -98,10 +100,6 @@ if not df_filtered.empty and 'prediction' in df_filtered.columns:
     st.plotly_chart(fig_pred, use_container_width=True)
 else:
     st.info('Nenhuma previsão disponível para mostrar.')
-
-import numpy as np
-from sklearn.calibration import calibration_curve
-import plotly.graph_objects as go
 
 st.subheader("Diagrama de Calibração (Over 2.5)")
 
@@ -175,7 +173,7 @@ if not df_filtered.empty and "probability" in df_filtered.columns and "result" i
     st.subheader("Distribuição das probabilidades previstas")
     fig_hist = go.Figure()
     fig_hist.add_trace(go.Histogram(
-        x=y_prob_all, nbinsx=20,
+        x=y_prob_all, bins=20,
         name="Todos jogos",
         opacity=0.7,
         marker_color="#1f77b4"
