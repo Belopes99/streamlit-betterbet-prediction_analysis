@@ -6,10 +6,12 @@ import numpy as np
 from sklearn.metrics import confusion_matrix, classification_report, accuracy_score
 import plotly.express as px
 import plotly.graph_objects as go
+import json
 
-CAMINHO_CHAVE = r'C:\Users\belop\OneDrive\Área de Trabalho\BetterBet\Streamlit\betterbet-467621-8f9a111319d9.json'
-credentials = service_account.Credentials.from_service_account_file(CAMINHO_CHAVE)
-project_id = 'betterbet-467621'
+# Lê credenciais do secret
+credentials_info = json.loads(st.secrets["gcp"]["key"])
+credentials = service_account.Credentials.from_service_account_info(credentials_info)
+project_id = credentials_info["project_id"]
 client = bigquery.Client(credentials=credentials, project=project_id)
 
 st.title('Matriz de Confusão e Métricas')
@@ -31,7 +33,6 @@ league_options = ['Todas'] + sorted(df['league_name'].dropna().unique())
 season_options = ['Todas'] + sorted(df['season_id'].dropna().unique())
 model_version_options = ['Todas'] + sorted(df['model_version'].dropna().unique())
 
-# Valores para filtros numéricos
 prob_min, prob_max = float(df['probability'].min()), float(df['probability'].max())
 odd_over_min, odd_over_max = float(df['odd_goals_over_2_5'].min()), float(df['odd_goals_over_2_5'].max())
 odd_under_min, odd_under_max = float(df['odd_goals_under_2_5'].min()), float(df['odd_goals_under_2_5'].max())
@@ -45,9 +46,12 @@ with st.sidebar:
     date_max = df['match_date'].max().date()
     min_date = st.date_input('Data mínima', value=date_min, min_value=date_min, max_value=date_max)
     max_date = st.date_input('Data máxima', value=date_max, min_value=date_min, max_value=date_max)
-    probability_range = st.slider("Probability (min, max)", min_value=prob_min, max_value=prob_max, value=(prob_min, prob_max), step=0.01)
-    odd_over_range = st.slider("Odd Over 2.5 (min, max)", min_value=odd_over_min, max_value=odd_over_max, value=(odd_over_min, odd_over_max), step=0.01)
-    odd_under_range = st.slider("Odd Under 2.5 (min, max)", min_value=odd_under_min, max_value=odd_under_max, value=(odd_under_min, odd_under_max), step=0.01)
+    probability_range = st.slider("Probability (min, max)", min_value=prob_min, max_value=prob_max,
+                                  value=(prob_min, prob_max), step=0.01)
+    odd_over_range = st.slider("Odd Over 2.5 (min, max)", min_value=odd_over_min, max_value=odd_over_max,
+                               value=(odd_over_min, odd_over_max), step=0.01)
+    odd_under_range = st.slider("Odd Under 2.5 (min, max)", min_value=odd_under_min, max_value=odd_under_max,
+                                value=(odd_under_min, odd_under_max), step=0.01)
 
 filtro_league = df['league_name'] == selected_league if selected_league != 'Todas' else True
 filtro_season = df['season_id'] == selected_season if selected_season != 'Todas' else True
@@ -58,10 +62,10 @@ filtro_odd_over = (df['odd_goals_over_2_5'] >= odd_over_range[0]) & (df['odd_goa
 filtro_odd_under = (df['odd_goals_under_2_5'] >= odd_under_range[0]) & (df['odd_goals_under_2_5'] <= odd_under_range[1])
 
 df_filtered = df[
-    filtro_league 
-    & filtro_season 
-    & filtro_model_version 
-    & filtro_data 
+    filtro_league
+    & filtro_season
+    & filtro_model_version
+    & filtro_data
     & filtro_probability
     & filtro_odd_over
     & filtro_odd_under
