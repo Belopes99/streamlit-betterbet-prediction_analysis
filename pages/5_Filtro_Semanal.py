@@ -2,15 +2,31 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import json
+from google.cloud import bigquery
+from google.oauth2 import service_account
 
 st.title("Análise de Lucro Semanal por Estratégia")
 
-# Use seu caminho ou adapte para BigQuery se preferir
-csv_path = r"C:\Users\belop\Downloads\jogos_passados.csv"
-df = pd.read_csv(csv_path)
+# Autenticação via secrets do Streamlit Cloud
+credentials_info = json.loads(st.secrets["gcp"]["key"])
+credentials = service_account.Credentials.from_service_account_info(credentials_info)
+project_id = credentials_info["project_id"]
+client = bigquery.Client(credentials=credentials, project=project_id)
 
-# Preparação dos dados
-df.columns = [c.lower() for c in df.columns]
+QUERY = """
+SELECT *
+FROM `betterbet-467621.betterbet.predictions`
+WHERE DATE(match_date) >= DATE('2025-10-28')
+"""
+
+@st.cache_data
+def run_query(sql):
+    return client.query(sql).to_dataframe()
+
+df = run_query(QUERY)
+df['match_date'] = pd.to_datetime(df['match_date']).dt.tz_localize(None)
+
 needed = [
     "probability",
     "result",
@@ -26,11 +42,9 @@ for c in needed:
 df = df.dropna(subset=["probability", "result", "match_date"]).copy()
 df["result_norm"] = df["result"].astype(str).str.strip().str.lower()
 df["real_result"] = (df["result_norm"] == "over").astype(int)
-df["match_date"] = pd.to_datetime(df["match_date"], errors="coerce")
-df = df.dropna(subset=["match_date"]).copy()
+
 df["probability_under"] = 1 - df["probability"]
 
-# Inputs do usuário
 conf_min = st.number_input("Confiança MÍNIMA", min_value=0.0, max_value=1.0, value=0.50, step=0.01)
 conf_max = st.number_input("Confiança MÁXIMA", min_value=0.0, max_value=1.0, value=1.00, step=0.01)
 odd_min = st.number_input("Odd mínima", min_value=1.0, value=1.30, step=0.01)
@@ -40,7 +54,6 @@ if conf_max < conf_min:
     st.error("Confiança MÁXIMA não pode ser menor que MÍNIMA.")
     st.stop()
 
-# Filtro
 if mercado == "over":
     apostas = df[
         (df["probability"] >= conf_min) &
@@ -58,7 +71,6 @@ if apostas.empty:
     st.warning("Nenhuma aposta encontrada com esses filtros.")
     st.stop()
 
-# Calcular lucro por aposta
 if mercado == "over":
     apostas["lucro"] = np.where(
         apostas["real_result"] == 1,
@@ -72,7 +84,6 @@ else:
         -1
     )
 
-# Agrupar por semana (ano-semana)
 apostas["ano_semana"] = apostas["match_date"].dt.strftime("%G-%V")
 resumo_semana = (
     apostas
@@ -86,11 +97,9 @@ resumo_semana = (
 )
 resumo_semana["lucro_acumulado"] = resumo_semana["lucro_semana"].cumsum()
 
-# Exibir tabela
 st.subheader("Resumo Semanal")
 st.dataframe(resumo_semana)
 
-# Plotagem com Plotly
 fig = go.Figure()
 fig.add_trace(go.Bar(
     x=resumo_semana["ano_semana"],
