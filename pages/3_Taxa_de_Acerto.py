@@ -4,16 +4,15 @@ from google.oauth2 import service_account
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import json
 
-
-CAMINHO_CHAVE = r'C:\Users\belop\OneDrive\Área de Trabalho\BetterBet\Streamlit\betterbet-467621-8f9a111319d9.json'
-credentials = service_account.Credentials.from_service_account_file(CAMINHO_CHAVE)
-project_id = 'betterbet-467621'
+# Usa credenciais do secret do Streamlit Cloud
+credentials_info = json.loads(st.secrets["gcp"]["key"])
+credentials = service_account.Credentials.from_service_account_info(credentials_info)
+project_id = credentials_info["project_id"]
 client = bigquery.Client(credentials=credentials, project=project_id)
 
-
 st.title('Taxa de Acerto por Faixa de Confiança')
-
 
 QUERY = """
 SELECT *
@@ -21,21 +20,17 @@ FROM `betterbet-467621.betterbet.predictions`
 WHERE DATE(match_date) >= DATE('2025-10-28')
 """
 
-
 @st.cache_data
 def run_query(sql):
     return client.query(sql).to_dataframe()
 
-
 df = run_query(QUERY)
 df['match_date'] = pd.to_datetime(df['match_date']).dt.tz_localize(None)
-
 
 league_options = ['Todas'] + sorted(df['league_name'].dropna().unique())
 season_options = ['Todas'] + sorted(df['season_id'].dropna().unique())
 model_version_options = ['Todas'] + sorted(df['model_version'].dropna().unique())
 
-# Filtros adicionais (probability e odds)
 prob_min, prob_max = float(df['probability'].min()), float(df['probability'].max())
 odd_over_min, odd_over_max = float(df['odd_goals_over_2_5'].min()), float(df['odd_goals_over_2_5'].max())
 odd_under_min, odd_under_max = float(df['odd_goals_under_2_5'].min()), float(df['odd_goals_under_2_5'].max())
@@ -50,12 +45,14 @@ with st.sidebar:
     min_date = st.date_input('Data mínima', value=date_min, min_value=date_min, max_value=date_max)
     max_date = st.date_input('Data máxima', value=date_max, min_value=date_min, max_value=date_max)
 
-    probability_range = st.slider("Probability (min, max)", min_value=prob_min, max_value=prob_max, value=(prob_min, prob_max), step=0.01)
+    probability_range = st.slider("Probability (min, max)", min_value=prob_min, max_value=prob_max,
+                                  value=(prob_min, prob_max), step=0.01)
 
-    odd_over_range = st.slider("Odd Over 2.5 (min, max)", min_value=odd_over_min, max_value=odd_over_max, value=(odd_over_min, odd_over_max), step=0.01)
+    odd_over_range = st.slider("Odd Over 2.5 (min, max)", min_value=odd_over_min, max_value=odd_over_max,
+                               value=(odd_over_min, odd_over_max), step=0.01)
 
-    odd_under_range = st.slider("Odd Under 2.5 (min, max)", min_value=odd_under_min, max_value=odd_under_max, value=(odd_under_min, odd_under_max), step=0.01)
-
+    odd_under_range = st.slider("Odd Under 2.5 (min, max)", min_value=odd_under_min, max_value=odd_under_max,
+                                value=(odd_under_min, odd_under_max), step=0.01)
 
 filtro_league = df['league_name'] == selected_league if selected_league != 'Todas' else True
 filtro_season = df['season_id'] == selected_season if selected_season != 'Todas' else True
@@ -65,11 +62,10 @@ filtro_probability = (df['probability'] >= probability_range[0]) & (df['probabil
 filtro_odd_over = (df['odd_goals_over_2_5'] >= odd_over_range[0]) & (df['odd_goals_over_2_5'] <= odd_over_range[1])
 filtro_odd_under = (df['odd_goals_under_2_5'] >= odd_under_range[0]) & (df['odd_goals_under_2_5'] <= odd_under_range[1])
 
-
 df_filtered = df[
-    filtro_league 
-    & filtro_season 
-    & filtro_model_version 
+    filtro_league
+    & filtro_season
+    & filtro_model_version
     & filtro_data
     & filtro_probability
     & filtro_odd_over
@@ -87,7 +83,6 @@ def analisar_por_faixa(df, tipo="over"):
     df['y_true'] = df['result_norm'].map(map_result)
     df['y_pred'] = (df['probability'] >= 0.5).astype(int)
     df = df[df['y_true'].notna()]
-
 
     for thr in faixas:
         if tipo == 'over':
@@ -110,19 +105,13 @@ if not df_filtered.empty:
     tabela_over = analisar_por_faixa(df_filtered, tipo="over")
     tabela_under = analisar_por_faixa(df_filtered, tipo="under")
 
-
-    # Mostrar tabelas
     st.subheader("📈 Taxa de Acerto por Faixa de Confiança (OVER 2.5)")
     st.dataframe(tabela_over)
-
 
     st.subheader("📉 Taxa de Acerto por Faixa de Confiança (UNDER 2.5)")
     st.dataframe(tabela_under)
 
-
-    # Visualizações lado a lado
     col1, col2 = st.columns(2)
-
 
     with col1:
         st.subheader("Taxa de Acerto por Faixa (Over)")
@@ -139,7 +128,6 @@ if not df_filtered.empty:
             height=400
         )
         st.plotly_chart(fig_over, use_container_width=True)
-
 
     with col2:
         st.subheader("Taxa de Acerto por Faixa (Under)")
