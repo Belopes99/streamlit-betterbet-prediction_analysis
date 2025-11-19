@@ -173,7 +173,7 @@ if not df_filtered.empty and "probability" in df_filtered.columns and "result" i
     st.subheader("Distribuição das probabilidades previstas")
     fig_hist = go.Figure()
     fig_hist.add_trace(go.Histogram(
-        x=y_prob_all, bins=20,
+        x=y_prob_all, nbinsx=20,
         name="Todos jogos",
         opacity=0.7,
         marker_color="#1f77b4"
@@ -187,3 +187,4 @@ if not df_filtered.empty and "probability" in df_filtered.columns and "result" i
     st.plotly_chart(fig_hist, use_container_width=True, key="hist_prob")
 else:
     st.info("Sem dados suficientes para gerar a curva de calibração.")
+
