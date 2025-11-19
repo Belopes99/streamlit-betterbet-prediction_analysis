@@ -45,9 +45,12 @@ with st.sidebar:
     date_max = df['match_date'].max().date()
     min_date = st.date_input('Data mínima', value=date_min, min_value=date_min, max_value=date_max)
     max_date = st.date_input('Data máxima', value=date_max, min_value=date_min, max_value=date_max)
-    probability_range = st.slider("Probability (min, max)", min_value=prob_min, max_value=prob_max, value=(prob_min, prob_max), step=0.01)
-    odd_over_range = st.slider("Odd Over 2.5 (min, max)", min_value=odd_over_min, max_value=odd_over_max, value=(odd_over_min, odd_over_max), step=0.01)
-    odd_under_range = st.slider("Odd Under 2.5 (min, max)", min_value=odd_under_min, max_value=odd_under_max, value=(odd_under_min, odd_under_max), step=0.01)
+    probability_range = st.slider("Probability (min, max)", min_value=prob_min, max_value=prob_max,
+                                  value=(prob_min, prob_max), step=0.01)
+    odd_over_range = st.slider("Odd Over 2.5 (min, max)", min_value=odd_over_min, max_value=odd_over_max,
+                               value=(odd_over_min, odd_over_max), step=0.01)
+    odd_under_range = st.slider("Odd Under 2.5 (min, max)", min_value=odd_under_min, max_value=odd_under_max,
+                                value=(odd_under_min, odd_under_max), step=0.01)
 
 filtro_league = df['league_name'] == selected_league if selected_league != 'Todas' else True
 filtro_season = df['season_id'] == selected_season if selected_season != 'Todas' else True
@@ -66,6 +69,8 @@ df_filtered = df[
     & filtro_odd_over
     & filtro_odd_under
 ].copy()
+
+# MATRIZ CONF X ODD
 
 def analisar_conf_odd_matriz(df, tipo="over"):
     odd_over_col = "odd_goals_over_2_5"
@@ -120,9 +125,7 @@ def analisar_conf_odd_matriz(df, tipo="over"):
                 "acc": round(taxa, 2) if n_apostas > 0 else np.nan,
                 "roi": round(roi, 2) if n_apostas > 0 else np.nan
             })
-
     df_long = pd.DataFrame(linhas)
-
     matriz_roi = df_long.pivot(index="conf_min", columns="odd_min", values="roi")
     matriz_n = df_long.pivot(index="conf_min", columns="odd_min", values="n")
     df_long["roi_n"] = np.where(
@@ -310,7 +313,6 @@ def analisar_ev_coerente(df, tipo="over"):
 
     return pd.DataFrame(resultados)
 
-# Cálculo ROI e N entradas por liga
 def calcular_roi_por_liga(df_liga):
     odd_over_col = "odd_goals_over_2_5"
     odd_under_col = "odd_goals_under_2_5"
@@ -324,6 +326,116 @@ def calcular_roi_por_liga(df_liga):
     return ganhos.sum() / len(df_liga) * 100
 
 if not df_filtered.empty:
+    matriz_roi_over, matriz_n_over, matriz_roi_n_over = analisar_conf_odd_matriz(df_filtered, tipo="over")
+    matriz_roi_under, matriz_n_under, matriz_roi_n_under = analisar_conf_odd_matriz(df_filtered, tipo="under")
+
+    plot_heatmap_text(matriz_roi_over, matriz_roi_n_over, "📈 OVER 2.5 — ROI (%) por confiança × odd mínima")
+    plot_heatmap_text(matriz_roi_under, matriz_roi_n_under, "📉 UNDER 2.5 — ROI (%) por confiança × odd mínima")
+
+    # --- Análise "por Odd mínima" abaixo dos heatmaps ---
+    st.header('ROI por faixa de Odd mínima (probabilidade fixa)')
+    st.caption('Faixas de odd mínima considerando prob >= 0.5 para over e prob < 0.5 para under.')
+
+    tabela_over = analisar_por_odd(df_filtered, tipo="over")
+    tabela_under = analisar_por_odd(df_filtered, tipo="under")
+
+    st.subheader('📈 OVER 2.5 — por odd mínima (prob >= 0.50)')
+    st.dataframe(tabela_over)
+
+    st.subheader('📉 UNDER 2.5 — por odd mínima (prob < 0.50)')
+    st.dataframe(tabela_under)
+
+    # Gráficos para ROI por odd
+    st.subheader('Gráfico de ROI por Odd mínima (Over)')
+    fig_over = px.line(tabela_over, x='Odd mínima', y='ROI (%)', markers=True, text='N apostas')
+    fig_over.update_traces(textposition='top center')
+    fig_over.update_layout(
+        width=800, height=400,
+        yaxis_title='ROI (%)',
+        xaxis_title='Odd mínima',
+        font=dict(size=18),
+        xaxis=dict(title=dict(text='Odd mínima', font=dict(size=22)), tickfont=dict(size=18)),
+        yaxis=dict(title=dict(text='ROI (%)', font=dict(size=22)), tickfont=dict(size=18))
+    )
+    st.plotly_chart(fig_over, use_container_width=True, key="line_over_odd")
+
+    st.subheader('Gráfico de ROI por Odd mínima (Under)')
+    fig_under = px.line(tabela_under, x='Odd mínima', y='ROI (%)', markers=True, text='N apostas')
+    fig_under.update_traces(textposition='top center')
+    fig_under.update_layout(
+        width=800, height=400,
+        yaxis_title='ROI (%)',
+        xaxis_title='Odd mínima',
+        font=dict(size=18),
+        xaxis=dict(title=dict(text='Odd mínima', font=dict(size=22)), tickfont=dict(size=18)),
+        yaxis=dict(title=dict(text='ROI (%)', font=dict(size=22)), tickfont=dict(size=18))
+    )
+    st.plotly_chart(fig_under, use_container_width=True, key="line_under_odd")
+
+    st.header('EV+ — ROI por edge mínimo (sem filtro precoce)')
+    tabela_ev_over = analisar_por_edge(df_filtered, tipo="over")
+    tabela_ev_under = analisar_por_edge(df_filtered, tipo="under")
+
+    st.subheader('📈 OVER 2.5 — EV+ por edge mínimo')
+    st.dataframe(tabela_ev_over)
+
+    st.subheader('📉 UNDER 2.5 — EV+ por edge mínimo')
+    st.dataframe(tabela_ev_under)
+
+    st.subheader('Gráfico EV+ (Over)')
+    fig_ev_over = px.line(tabela_ev_over, x='Edge mínimo (EV)', y='ROI (%)', markers=True, text='N apostas')
+    fig_ev_over.update_traces(textposition='top center')
+    fig_ev_over.update_layout(
+        height=400,
+        font=dict(size=18),
+        xaxis=dict(title=dict(text='Edge mínimo (EV)', font=dict(size=22)), tickfont=dict(size=18)),
+        yaxis=dict(title=dict(text='ROI (%)', font=dict(size=22)), tickfont=dict(size=18))
+    )
+    st.plotly_chart(fig_ev_over, use_container_width=True, key="ev_over")
+
+    st.subheader('Gráfico EV+ (Under)')
+    fig_ev_under = px.line(tabela_ev_under, x='Edge mínimo (EV)', y='ROI (%)', markers=True, text='N apostas')
+    fig_ev_under.update_traces(textposition='top center')
+    fig_ev_under.update_layout(
+        height=400,
+        font=dict(size=18),
+        xaxis=dict(title=dict(text='Edge mínimo (EV)', font=dict(size=22)), tickfont=dict(size=18)),
+        yaxis=dict(title=dict(text='ROI (%)', font=dict(size=22)), tickfont=dict(size=18))
+    )
+    st.plotly_chart(fig_ev_under, use_container_width=True, key="ev_under")
+
+    st.header('EV+ Compatível com Confiança do Modelo (Prob ≥ 0.5 Over, Prob < 0.5 Under)')
+    tabela_ev_over_coerente = analisar_ev_coerente(df_filtered, tipo="over")
+    tabela_ev_under_coerente = analisar_ev_coerente(df_filtered, tipo="under")
+
+    st.subheader('📈 OVER 2.5 — EV+')
+    st.dataframe(tabela_ev_over_coerente)
+
+    st.subheader('📉 UNDER 2.5 — EV+')
+    st.dataframe(tabela_ev_under_coerente)
+
+    st.subheader('Gráfico EV+ (Over)')
+    fig_ev_over_c = px.line(tabela_ev_over_coerente, x='Edge mínimo (EV)', y='ROI (%)', markers=True, text='N apostas')
+    fig_ev_over_c.update_traces(textposition='top center')
+    fig_ev_over_c.update_layout(
+        height=400,
+        font=dict(size=18),
+        xaxis=dict(title=dict(text='Edge mínimo (EV)', font=dict(size=22)), tickfont=dict(size=18)),
+        yaxis=dict(title=dict(text='ROI (%)', font=dict(size=22)), tickfont=dict(size=18))
+    )
+    st.plotly_chart(fig_ev_over_c, use_container_width=True, key="ev_coerente_over")
+
+    st.subheader('Gráfico EV+ (Under)')
+    fig_ev_under_c = px.line(tabela_ev_under_coerente, x='Edge mínimo (EV)', y='ROI (%)', markers=True, text='N apostas')
+    fig_ev_under_c.update_traces(textposition='top center')
+    fig_ev_under_c.update_layout(
+        height=400,
+        font=dict(size=18),
+        xaxis=dict(title=dict(text='Edge mínimo (EV)', font=dict(size=22)), tickfont=dict(size=18)),
+        yaxis=dict(title=dict(text='ROI (%)', font=dict(size=22)), tickfont=dict(size=18))
+    )
+    st.plotly_chart(fig_ev_under_c, use_container_width=True, key="ev_coerente_under")
+
     count_entradas = df_filtered.groupby('league_name')['probability'].count()
     roi_liga = df_filtered.groupby('league_name').apply(calcular_roi_por_liga)
 
@@ -386,5 +498,6 @@ if not df_filtered.empty:
     )
 
     st.plotly_chart(fig, use_container_width=True, key="roi_barras_liga")
+
 else:
     st.info("Nenhum dado disponível para análise de ROI e entradas por liga.")
