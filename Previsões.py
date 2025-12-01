@@ -31,65 +31,131 @@ def run_query(sql):
 df = run_query(QUERY)
 df['match_date'] = pd.to_datetime(df['match_date']).dt.tz_localize(None)
 
+# ---- Inicialização de estado global de filtros ----
+if "filters_leagues" not in st.session_state:
+    st.session_state["filters_leagues"] = ["Todas"]
+if "filters_seasons" not in st.session_state:
+    st.session_state["filters_seasons"] = ["Todas"]
+if "filters_models" not in st.session_state:
+    st.session_state["filters_models"] = ["Todas"]
+if "filters_date_min" not in st.session_state:
+    st.session_state["filters_date_min"] = df["match_date"].min().date()
+if "filters_date_max" not in st.session_state:
+    st.session_state["filters_date_max"] = df["match_date"].max().date()
+if "filters_prob_range" not in st.session_state:
+    st.session_state["filters_prob_range"] = (
+        float(df["probability"].min()),
+        float(df["probability"].max()),
+    )
+if "filters_odd_over_range" not in st.session_state:
+    st.session_state["filters_odd_over_range"] = (
+        float(df["odd_goals_over_2_5"].min()),
+        float(df["odd_goals_over_2_5"].max()),
+    )
+if "filters_odd_under_range" not in st.session_state:
+    st.session_state["filters_odd_under_range"] = (
+        float(df["odd_goals_under_2_5"].min()),
+        float(df["odd_goals_under_2_5"].max()),
+    )
+
 league_options = ['Todas'] + sorted(df['league_name'].dropna().unique())
 season_options = ['Todas'] + sorted(df['season_id'].dropna().unique())
 model_version_options = ['Todas'] + sorted(df['model_version'].dropna().unique())
 
 with st.sidebar:
-    st.subheader('Filtros de relatório')
+    st.subheader('Filtros de relatório (globais)')
 
-    # Multiselect em vez de selectbox
-    selected_leagues = st.multiselect(
+    # Multiselects lendo/salvando em session_state
+    sel_leagues = st.multiselect(
         'Selecione a(s) liga(s)',
         league_options,
-        default=['Todas']
+        default=st.session_state["filters_leagues"],
+        key="_filters_leagues",
     )
-    selected_seasons = st.multiselect(
+    st.session_state["filters_leagues"] = sel_leagues
+
+    sel_seasons = st.multiselect(
         'Selecione a(s) temporada(s)',
         season_options,
-        default=['Todas']
+        default=st.session_state["filters_seasons"],
+        key="_filters_seasons",
     )
-    selected_model_versions = st.multiselect(
+    st.session_state["filters_seasons"] = sel_seasons
+
+    sel_models = st.multiselect(
         'Selecione a(s) versão(ões) do modelo)',
         model_version_options,
-        default=['Todas']
+        default=st.session_state["filters_models"],
+        key="_filters_models",
     )
+    st.session_state["filters_models"] = sel_models
 
-    date_min = df['match_date'].min().date()
-    date_max = df['match_date'].max().date()
-    min_date = st.date_input('Data mínima', value=date_min, min_value=date_min, max_value=date_max)
-    max_date = st.date_input('Data máxima', value=date_max, min_value=date_min, max_value=date_max)
+    date_min_global = df['match_date'].min().date()
+    date_max_global = df['match_date'].max().date()
+
+    date_min_sel = st.date_input(
+        'Data mínima',
+        value=st.session_state["filters_date_min"],
+        min_value=date_min_global,
+        max_value=date_max_global,
+        key="_filters_date_min",
+    )
+    date_max_sel = st.date_input(
+        'Data máxima',
+        value=st.session_state["filters_date_max"],
+        min_value=date_min_global,
+        max_value=date_max_global,
+        key="_filters_date_max",
+    )
+    st.session_state["filters_date_min"] = date_min_sel
+    st.session_state["filters_date_max"] = date_max_sel
 
     # Filtros deslizantes numéricos
     prob_min = float(df['probability'].min())
     prob_max = float(df['probability'].max())
-    probability_range = st.slider(
+    prob_range_sel = st.slider(
         "Probability (min, max)",
         min_value=prob_min,
         max_value=prob_max,
-        value=(prob_min, prob_max),
-        step=0.01
+        value=st.session_state["filters_prob_range"],
+        step=0.01,
+        key="_filters_prob_range",
     )
+    st.session_state["filters_prob_range"] = prob_range_sel
 
     odd_over_min = float(df['odd_goals_over_2_5'].min())
     odd_over_max = float(df['odd_goals_over_2_5'].max())
-    odd_over_range = st.slider(
+    odd_over_range_sel = st.slider(
         "Odd Over 2.5 (min, max)",
         min_value=odd_over_min,
         max_value=odd_over_max,
-        value=(odd_over_min, odd_over_max),
-        step=0.01
+        value=st.session_state["filters_odd_over_range"],
+        step=0.01,
+        key="_filters_odd_over_range",
     )
+    st.session_state["filters_odd_over_range"] = odd_over_range_sel
 
     odd_under_min = float(df['odd_goals_under_2_5'].min())
     odd_under_max = float(df['odd_goals_under_2_5'].max())
-    odd_under_range = st.slider(
+    odd_under_range_sel = st.slider(
         "Odd Under 2.5 (min, max)",
         min_value=odd_under_min,
         max_value=odd_under_max,
-        value=(odd_under_min, odd_under_max),
-        step=0.01
+        value=st.session_state["filters_odd_under_range"],
+        step=0.01,
+        key="_filters_odd_under_range",
     )
+    st.session_state["filters_odd_under_range"] = odd_under_range_sel
+
+# A partir daqui, sempre ler dos filtros globais
+selected_leagues = st.session_state["filters_leagues"]
+selected_seasons = st.session_state["filters_seasons"]
+selected_model_versions = st.session_state["filters_models"]
+min_date = st.session_state["filters_date_min"]
+max_date = st.session_state["filters_date_max"]
+probability_range = st.session_state["filters_prob_range"]
+odd_over_range = st.session_state["filters_odd_over_range"]
+odd_under_range = st.session_state["filters_odd_under_range"]
 
 # Filtros categóricos com múltipla seleção
 if 'Todas' in selected_leagues or len(selected_leagues) == 0:
