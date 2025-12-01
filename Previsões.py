@@ -5,7 +5,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 import json
 from sklearn.calibration import calibration_curve
-import plotly_graphics as go
+import plotly.graph_objects as go
 import numpy as np
 
 st.set_page_config(page_title="Previsões", page_icon="📊", layout="wide")
@@ -50,7 +50,7 @@ with st.sidebar:
         default=['Todas']
     )
     selected_model_versions = st.multiselect(
-        'Selecione a(s) versão(ões) do modelo',
+        'Selecione a(s) versão(ões) do modelo)',
         model_version_options,
         default=['Todas']
     )
