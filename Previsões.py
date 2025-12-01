@@ -5,7 +5,7 @@ from google.cloud import bigquery
 from google.oauth2 import service_account
 import json
 from sklearn.calibration import calibration_curve
-import plotly.graph_objects as go
+import plotly_graphics as go
 import numpy as np
 
 st.set_page_config(page_title="Previsões", page_icon="📊", layout="wide")
@@ -37,9 +37,24 @@ model_version_options = ['Todas'] + sorted(df['model_version'].dropna().unique()
 
 with st.sidebar:
     st.subheader('Filtros de relatório')
-    selected_league = st.selectbox('Selecione a liga', league_options)
-    selected_season = st.selectbox('Selecione a temporada', season_options)
-    selected_model_version = st.selectbox('Selecione a versão do modelo', model_version_options)
+
+    # Multiselect em vez de selectbox
+    selected_leagues = st.multiselect(
+        'Selecione a(s) liga(s)',
+        league_options,
+        default=['Todas']
+    )
+    selected_seasons = st.multiselect(
+        'Selecione a(s) temporada(s)',
+        season_options,
+        default=['Todas']
+    )
+    selected_model_versions = st.multiselect(
+        'Selecione a(s) versão(ões) do modelo',
+        model_version_options,
+        default=['Todas']
+    )
+
     date_min = df['match_date'].min().date()
     date_max = df['match_date'].max().date()
     min_date = st.date_input('Data mínima', value=date_min, min_value=date_min, max_value=date_max)
@@ -48,19 +63,51 @@ with st.sidebar:
     # Filtros deslizantes numéricos
     prob_min = float(df['probability'].min())
     prob_max = float(df['probability'].max())
-    probability_range = st.slider("Probability (min, max)", min_value=prob_min, max_value=prob_max, value=(prob_min, prob_max), step=0.01)
-    
+    probability_range = st.slider(
+        "Probability (min, max)",
+        min_value=prob_min,
+        max_value=prob_max,
+        value=(prob_min, prob_max),
+        step=0.01
+    )
+
     odd_over_min = float(df['odd_goals_over_2_5'].min())
     odd_over_max = float(df['odd_goals_over_2_5'].max())
-    odd_over_range = st.slider("Odd Over 2.5 (min, max)", min_value=odd_over_min, max_value=odd_over_max, value=(odd_over_min, odd_over_max), step=0.01)
-    
+    odd_over_range = st.slider(
+        "Odd Over 2.5 (min, max)",
+        min_value=odd_over_min,
+        max_value=odd_over_max,
+        value=(odd_over_min, odd_over_max),
+        step=0.01
+    )
+
     odd_under_min = float(df['odd_goals_under_2_5'].min())
     odd_under_max = float(df['odd_goals_under_2_5'].max())
-    odd_under_range = st.slider("Odd Under 2.5 (min, max)", min_value=odd_under_min, max_value=odd_under_max, value=(odd_under_min, odd_under_max), step=0.01)
-    
-filtro_league = df['league_name'] == selected_league if selected_league != 'Todas' else True
-filtro_season = df['season_id'] == selected_season if selected_season != 'Todas' else True
-filtro_model_version = df['model_version'] == selected_model_version if selected_model_version != 'Todas' else True
+    odd_under_range = st.slider(
+        "Odd Under 2.5 (min, max)",
+        min_value=odd_under_min,
+        max_value=odd_under_max,
+        value=(odd_under_min, odd_under_max),
+        step=0.01
+    )
+
+# Filtros categóricos com múltipla seleção
+if 'Todas' in selected_leagues or len(selected_leagues) == 0:
+    filtro_league = True
+else:
+    filtro_league = df['league_name'].isin(selected_leagues)
+
+if 'Todas' in selected_seasons or len(selected_seasons) == 0:
+    filtro_season = True
+else:
+    filtro_season = df['season_id'].isin(selected_seasons)
+
+if 'Todas' in selected_model_versions or len(selected_model_versions) == 0:
+    filtro_model_version = True
+else:
+    filtro_model_version = df['model_version'].isin(selected_model_versions)
+
+# Filtros contínuos
 filtro_data = (df['match_date'] >= pd.Timestamp(min_date)) & (df['match_date'] <= pd.Timestamp(max_date))
 filtro_probability = (df['probability'] >= probability_range[0]) & (df['probability'] <= probability_range[1])
 filtro_odd_over = (df['odd_goals_over_2_5'] >= odd_over_range[0]) & (df['odd_goals_over_2_5'] <= odd_over_range[1])
@@ -78,7 +125,11 @@ df_filtered = df[
 
 st.subheader('Relatório filtrado')
 st.write(f"Exibindo jogos entre: {min_date} e {max_date}")
-st.write(f"Liga selecionada: {selected_league} | Temporada selecionada: {selected_season} | Modelo: {selected_model_version}")
+st.write(
+    f"Ligas selecionadas: {', '.join(selected_leagues)} | "
+    f"Temporadas selecionadas: {', '.join(selected_seasons)} | "
+    f"Modelos: {', '.join(selected_model_versions)}"
+)
 st.dataframe(df_filtered)
 
 # Gráfico: quantidade de jogos por liga
@@ -96,7 +147,14 @@ st.subheader('Distribuição das previsões (Over/Under)')
 if not df_filtered.empty and 'prediction' in df_filtered.columns:
     pred_counts = df_filtered['prediction'].value_counts().reset_index()
     pred_counts.columns = ['Previsão', 'Quantidade']
-    fig_pred = px.bar(pred_counts, x='Previsão', y='Quantidade', text='Quantidade', color='Previsão', height=300)
+    fig_pred = px.bar(
+        pred_counts,
+        x='Previsão',
+        y='Quantidade',
+        text='Quantidade',
+        color='Previsão',
+        height=300
+    )
     st.plotly_chart(fig_pred, use_container_width=True)
 else:
     st.info('Nenhuma previsão disponível para mostrar.')
@@ -124,9 +182,13 @@ if not df_filtered.empty and "probability" in df_filtered.columns and "result" i
     y_prob_excl = df_excl15["probability"].astype(float).values
 
     # Curvas de calibração
-    prob_true_all, prob_pred_all = calibration_curve(y_true_all, y_prob_all, n_bins=10, strategy="uniform")
+    prob_true_all, prob_pred_all = calibration_curve(
+        y_true_all, y_prob_all, n_bins=10, strategy="uniform"
+    )
     if len(df_excl15) > 0:
-        prob_true_excl, prob_pred_excl = calibration_curve(y_true_excl, y_prob_excl, n_bins=10, strategy="uniform")
+        prob_true_excl, prob_pred_excl = calibration_curve(
+            y_true_excl, y_prob_excl, n_bins=10, strategy="uniform"
+        )
     else:
         prob_true_excl, prob_pred_excl = [], []
 
@@ -169,7 +231,7 @@ if not df_filtered.empty and "probability" in df_filtered.columns and "result" i
 
     st.plotly_chart(fig_calib, use_container_width=True, key="calibracao_over25")
 
-    # (Opcional) Histograma das probabilidades previstas
+    # Histograma das probabilidades previstas
     st.subheader("Distribuição das probabilidades previstas")
     fig_hist = go.Figure()
     fig_hist.add_trace(go.Histogram(
@@ -187,4 +249,3 @@ if not df_filtered.empty and "probability" in df_filtered.columns and "result" i
     st.plotly_chart(fig_hist, use_container_width=True, key="hist_prob")
 else:
     st.info("Sem dados suficientes para gerar a curva de calibração.")
-
