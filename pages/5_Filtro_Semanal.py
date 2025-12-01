@@ -27,6 +27,7 @@ def run_query(sql):
 df = run_query(QUERY)
 df['match_date'] = pd.to_datetime(df['match_date']).dt.tz_localize(None)
 
+# Garante colunas necessárias
 needed = [
     "probability",
     "result",
@@ -39,11 +40,83 @@ for c in needed:
         st.error(f"Coluna obrigatória não encontrada: {c}")
         st.stop()
 
+# Opções para filtros categóricos (caso queira usar aqui também)
+if 'league_name' in df.columns:
+    league_options = ['Todas'] + sorted(df['league_name'].dropna().unique())
+else:
+    league_options = ['Todas']
+
+if 'season_id' in df.columns:
+    season_options = ['Todas'] + sorted(df['season_id'].dropna().unique())
+else:
+    season_options = ['Todas']
+
+if 'model_version' in df.columns:
+    model_version_options = ['Todas'] + sorted(df['model_version'].dropna().unique())
+else:
+    model_version_options = ['Todas']
+
+with st.sidebar:
+    st.subheader("Filtros de amostra (opcionais)")
+
+    selected_leagues = st.multiselect(
+        "Selecione a(s) liga(s)",
+        league_options,
+        default=['Todas']
+    )
+    selected_seasons = st.multiselect(
+        "Selecione a(s) temporada(s)",
+        season_options,
+        default=['Todas']
+    )
+    selected_model_versions = st.multiselect(
+        "Selecione a(s) versão(ões) de modelo",
+        model_version_options,
+        default=['Todas']
+    )
+
+    date_min = df['match_date'].min().date()
+    date_max = df['match_date'].max().date()
+    min_date = st.date_input("Data mínima (amostra)", value=date_min, min_value=date_min, max_value=date_max)
+    max_date = st.date_input("Data máxima (amostra)", value=date_max, min_value=date_min, max_value=date_max)
+
+# Filtros categóricos
+if 'league_name' in df.columns:
+    if 'Todas' in selected_leagues or len(selected_leagues) == 0:
+        filtro_league = True
+    else:
+        filtro_league = df['league_name'].isin(selected_leagues)
+else:
+    filtro_league = True
+
+if 'season_id' in df.columns:
+    if 'Todas' in selected_seasons or len(selected_seasons) == 0:
+        filtro_season = True
+    else:
+        filtro_season = df['season_id'].isin(selected_seasons)
+else:
+    filtro_season = True
+
+if 'model_version' in df.columns:
+    if 'Todas' in selected_model_versions or len(selected_model_versions) == 0:
+        filtro_model_version = True
+    else:
+        filtro_model_version = df['model_version'].isin(selected_model_versions)
+else:
+    filtro_model_version = True
+
+# Filtro por data
+filtro_data = (df['match_date'] >= pd.Timestamp(min_date)) & (df['match_date'] <= pd.Timestamp(max_date))
+
+df = df[filtro_league & filtro_season & filtro_model_version & filtro_data].copy()
+
 df = df.dropna(subset=["probability", "result", "match_date"]).copy()
 df["result_norm"] = df["result"].astype(str).str.strip().str.lower()
 df["real_result"] = (df["result_norm"] == "over").astype(int)
 
 df["probability_under"] = 1 - df["probability"]
+
+st.subheader("Parâmetros da estratégia")
 
 conf_min = st.number_input("Confiança MÍNIMA", min_value=0.0, max_value=1.0, value=0.50, step=0.01)
 conf_max = st.number_input("Confiança MÁXIMA", min_value=0.0, max_value=1.0, value=1.00, step=0.01)
