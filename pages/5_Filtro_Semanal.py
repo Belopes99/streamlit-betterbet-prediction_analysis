@@ -40,7 +40,19 @@ for c in needed:
         st.error(f"Coluna obrigatória não encontrada: {c}")
         st.stop()
 
-# Opções para filtros categóricos (caso queira usar aqui também)
+# ---- Inicialização de estado global de filtros ----
+if "filters_leagues" not in st.session_state:
+    st.session_state["filters_leagues"] = ["Todas"]
+if "filters_seasons" not in st.session_state:
+    st.session_state["filters_seasons"] = ["Todas"]
+if "filters_models" not in st.session_state:
+    st.session_state["filters_models"] = ["Todas"]
+if "filters_date_min" not in st.session_state:
+    st.session_state["filters_date_min"] = df["match_date"].min().date()
+if "filters_date_max" not in st.session_state:
+    st.session_state["filters_date_max"] = df["match_date"].max().date()
+
+# Opções para filtros categóricos
 if 'league_name' in df.columns:
     league_options = ['Todas'] + sorted(df['league_name'].dropna().unique())
 else:
@@ -57,28 +69,57 @@ else:
     model_version_options = ['Todas']
 
 with st.sidebar:
-    st.subheader("Filtros de amostra (opcionais)")
+    st.subheader("Filtros de amostra (globais/opcionais)")
 
-    selected_leagues = st.multiselect(
+    sel_leagues = st.multiselect(
         "Selecione a(s) liga(s)",
         league_options,
-        default=['Todas']
+        default=st.session_state["filters_leagues"],
+        key="_filters_leagues",
     )
-    selected_seasons = st.multiselect(
+    st.session_state["filters_leagues"] = sel_leagues
+
+    sel_seasons = st.multiselect(
         "Selecione a(s) temporada(s)",
         season_options,
-        default=['Todas']
+        default=st.session_state["filters_seasons"],
+        key="_filters_seasons",
     )
-    selected_model_versions = st.multiselect(
+    st.session_state["filters_seasons"] = sel_seasons
+
+    sel_models = st.multiselect(
         "Selecione a(s) versão(ões) de modelo",
         model_version_options,
-        default=['Todas']
+        default=st.session_state["filters_models"],
+        key="_filters_models",
     )
+    st.session_state["filters_models"] = sel_models
 
-    date_min = df['match_date'].min().date()
-    date_max = df['match_date'].max().date()
-    min_date = st.date_input("Data mínima (amostra)", value=date_min, min_value=date_min, max_value=date_max)
-    max_date = st.date_input("Data máxima (amostra)", value=date_max, min_value=date_min, max_value=date_max)
+    date_min_global = df['match_date'].min().date()
+    date_max_global = df['match_date'].max().date()
+    date_min_sel = st.date_input(
+        "Data mínima (amostra)",
+        value=st.session_state["filters_date_min"],
+        min_value=date_min_global,
+        max_value=date_max_global,
+        key="_filters_date_min",
+    )
+    date_max_sel = st.date_input(
+        "Data máxima (amostra)",
+        value=st.session_state["filters_date_max"],
+        min_value=date_min_global,
+        max_value=date_max_global,
+        key="_filters_date_max",
+    )
+    st.session_state["filters_date_min"] = date_min_sel
+    st.session_state["filters_date_max"] = date_max_sel
+
+# Ler dos filtros globais
+selected_leagues = st.session_state["filters_leagues"]
+selected_seasons = st.session_state["filters_seasons"]
+selected_model_versions = st.session_state["filters_models"]
+min_date = st.session_state["filters_date_min"]
+max_date = st.session_state["filters_date_max"]
 
 # Filtros categóricos
 if 'league_name' in df.columns:
