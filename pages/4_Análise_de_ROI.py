@@ -38,23 +38,60 @@ odd_under_min, odd_under_max = float(df['odd_goals_under_2_5'].min()), float(df[
 
 with st.sidebar:
     st.subheader('Filtros de relatório')
-    selected_league = st.selectbox('Selecione a liga', league_options)
-    selected_season = st.selectbox('Selecione a temporada', season_options)
-    selected_model_version = st.selectbox('Selecione a versão do modelo', model_version_options)
+
+    selected_leagues = st.multiselect(
+        'Selecione a(s) liga(s)',
+        league_options,
+        default=['Todas']
+    )
+    selected_seasons = st.multiselect(
+        'Selecione a(s) temporada(s)',
+        season_options,
+        default=['Todas']
+    )
+    selected_model_versions = st.multiselect(
+        'Selecione a(s) versão(ões) do modelo',
+        model_version_options,
+        default=['Todas']
+    )
+
     date_min = df['match_date'].min().date()
     date_max = df['match_date'].max().date()
     min_date = st.date_input('Data mínima', value=date_min, min_value=date_min, max_value=date_max)
     max_date = st.date_input('Data máxima', value=date_max, min_value=date_min, max_value=date_max)
-    probability_range = st.slider("Probability (min, max)", min_value=prob_min, max_value=prob_max,
-                                  value=(prob_min, prob_max), step=0.01)
-    odd_over_range = st.slider("Odd Over 2.5 (min, max)", min_value=odd_over_min, max_value=odd_over_max,
-                               value=(odd_over_min, odd_over_max), step=0.01)
-    odd_under_range = st.slider("Odd Under 2.5 (min, max)", min_value=odd_under_min, max_value=odd_under_max,
-                                value=(odd_under_min, odd_under_max), step=0.01)
+    probability_range = st.slider(
+        "Probability (min, max)",
+        min_value=prob_min, max_value=prob_max,
+        value=(prob_min, prob_max), step=0.01
+    )
+    odd_over_range = st.slider(
+        "Odd Over 2.5 (min, max)",
+        min_value=odd_over_min, max_value=odd_over_max,
+        value=(odd_over_min, odd_over_max), step=0.01
+    )
+    odd_under_range = st.slider(
+        "Odd Under 2.5 (min, max)",
+        min_value=odd_under_min, max_value=odd_under_max,
+        value=(odd_under_min, odd_under_max), step=0.01
+    )
 
-filtro_league = df['league_name'] == selected_league if selected_league != 'Todas' else True
-filtro_season = df['season_id'] == selected_season if selected_season != 'Todas' else True
-filtro_model_version = df['model_version'] == selected_model_version if selected_model_version != 'Todas' else True
+# Filtros categóricos com múltipla seleção
+if 'Todas' in selected_leagues or len(selected_leagues) == 0:
+    filtro_league = True
+else:
+    filtro_league = df['league_name'].isin(selected_leagues)
+
+if 'Todas' in selected_seasons or len(selected_seasons) == 0:
+    filtro_season = True
+else:
+    filtro_season = df['season_id'].isin(selected_seasons)
+
+if 'Todas' in selected_model_versions or len(selected_model_versions) == 0:
+    filtro_model_version = True
+else:
+    filtro_model_version = df['model_version'].isin(selected_model_versions)
+
+# Filtros contínuos
 filtro_data = (df['match_date'] >= pd.Timestamp(min_date)) & (df['match_date'] <= pd.Timestamp(max_date))
 filtro_probability = (df['probability'] >= probability_range[0]) & (df['probability'] <= probability_range[1])
 filtro_odd_over = (df['odd_goals_over_2_5'] >= odd_over_range[0]) & (df['odd_goals_over_2_5'] <= odd_over_range[1])
