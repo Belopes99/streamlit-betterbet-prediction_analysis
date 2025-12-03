@@ -187,7 +187,7 @@ def analisar_conf_odd_matriz(df, tipo="over"):
     else:
         faixas_conf = np.arange(0.50, -0.01, -0.05)
 
-    faixas_odd = np.arange(1.30, 2.21, 0.025)
+    faixas_odd = np.arange(1.10, 2.21, 0.025)
     linhas = []
 
     map_result = {"under": 0, "over": 1}
