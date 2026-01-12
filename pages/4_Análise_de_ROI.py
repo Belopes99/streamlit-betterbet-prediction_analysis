@@ -83,7 +83,7 @@ with st.sidebar:
     st.session_state["filters_seasons"] = sel_seasons
 
     sel_models = st.multiselect(
-        "Selecione a(s) versão(ões) do modelo",
+        "Selecione a(s) versão(ões) do modelo)",
         model_version_options,
         default=st.session_state["filters_models"],
         key="_filters_models",
@@ -150,7 +150,7 @@ probability_range = st.session_state["filters_prob_range"]
 odd_over_range = st.session_state["filters_odd_over_range"]
 odd_under_range = st.session_state["filters_odd_under_range"]
 
-# Filtros categóricos com múltipla seleção
+# Filtros categóricos
 if "Todas" in selected_leagues or len(selected_leagues) == 0:
     filtro_league = True
 else:
@@ -360,7 +360,10 @@ def curva_otima_para_mercado(
     df["is_win"] = cond_win.astype(int)
     df["conf_mercado"] = conf_mercado
 
-    conf_values = np.round(np.arange(conf_min, conf_max + 1e-9, conf_step), 4)
+    # confs sempre com 2 casas (0.51, 0.52, ...)
+    conf_start = np.ceil(conf_min * 100) / 100
+    conf_end = np.floor(conf_max * 100) / 100
+    conf_values = np.round(np.arange(conf_start, conf_end + 1e-9, conf_step), 2)
 
     odds_validas = df[col_odd].dropna()
     if odds_validas.empty:
@@ -368,7 +371,8 @@ def curva_otima_para_mercado(
 
     odd_min_global = float(odds_validas.min())
     odd_max_global = float(odds_validas.max())
-    odd_grid = np.round(np.arange(odd_min_global, odd_max_global + 1e-9, 0.01), 2)
+    # grid de odd de 0.1 em 0.1
+    odd_grid = np.round(np.arange(odd_min_global, odd_max_global + 1e-9, 0.10), 2)
 
     registros = []
 
@@ -409,7 +413,6 @@ def curva_otima_para_mercado(
         return curva_df, None
 
     df_global = df.copy()
-
     curva_df = curva_df.sort_values("conf_thr")
 
     def odd_min_para_conf(c):
@@ -426,6 +429,12 @@ def curva_otima_para_mercado(
         & (~df_global["odd_min_aplicada"].isna())
         & (df_global[col_odd] >= df_global["odd_min_aplicada"])
     ]
+
+    # garantir que cada jogo conte uma vez
+    if "match_id" in df_estrategia.columns:
+        df_estrategia = df_estrategia.drop_duplicates(subset=["match_id", col_odd])
+    else:
+        df_estrategia = df_estrategia.drop_duplicates(subset=["match_date", col_odd])
 
     roi_global, n_global, lucro_global = calcula_roi(df_estrategia["is_win"], df_estrategia[col_odd])
     taxa_acerto = df_estrategia["is_win"].mean() * 100 if n_global > 0 else np.nan
@@ -604,10 +613,18 @@ if not df_filtered.empty:
                 "Nenhum ponto da curva atinge o ROI alvo com esse N mínimo para Over 2.5."
             )
         else:
-            st.line_chart(
-                curva_over.set_index("conf_thr")["odd_min_otima"],
+            fig_over_curve = px.line(
+                curva_over,
+                x="odd_min_otima",
+                y="conf_thr",
+                markers=True,
+            )
+            fig_over_curve.update_layout(
+                xaxis_title="Odd mínima ótima",
+                yaxis_title="Confiança mínima",
                 height=350,
             )
+            st.plotly_chart(fig_over_curve, use_container_width=True)
             st.dataframe(curva_over)
 
         st.subheader("Estratégia combinada - Over 2.5")
@@ -633,10 +650,18 @@ if not df_filtered.empty:
                 "Nenhum ponto da curva atinge o ROI alvo com esse N mínimo para Under 2.5."
             )
         else:
-            st.line_chart(
-                curva_under.set_index("conf_thr")["odd_min_otima"],
+            fig_under_curve = px.line(
+                curva_under,
+                x="odd_min_otima",
+                y="conf_thr",
+                markers=True,
+            )
+            fig_under_curve.update_layout(
+                xaxis_title="Odd mínima ótima",
+                yaxis_title="Confiança mínima",
                 height=350,
             )
+            st.plotly_chart(fig_under_curve, use_container_width=True)
             st.dataframe(curva_under)
 
         st.subheader("Estratégia combinada - Under 2.5")
