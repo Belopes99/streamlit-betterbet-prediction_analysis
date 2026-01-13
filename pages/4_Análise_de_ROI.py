@@ -325,7 +325,7 @@ def calcular_roi_por_liga(df_liga):
     )
     return ganhos.sum() / len(df_liga) * 100
 
-# ===== NOVAS FUNÇÕES: CURVA ÓTIMA =====
+# ===== FUNÇÕES CURVA ÓTIMA (SEM ESTRATÉGIA COMBINADA) =====
 
 def calcula_roi(series_result, series_odds, stake=1.0):
     n = len(series_result)
@@ -408,46 +408,7 @@ def curva_otima_para_mercado(
             )
 
     curva_df = pd.DataFrame(registros)
-
-    if curva_df.empty:
-        return curva_df, None
-
-    df_global = df.copy()
-    curva_df = curva_df.sort_values("conf_thr")
-
-    def odd_min_para_conf(c):
-        validos = curva_df[curva_df["conf_thr"] <= c]
-        if validos.empty:
-            return np.nan
-        return validos["odd_min_otima"].max()
-
-    df_global["odd_min_aplicada"] = df_global["conf_mercado"].apply(odd_min_para_conf)
-
-    df_estrategia = df_global[
-        (df_global["conf_mercado"] >= conf_min)
-        & (df_global["conf_mercado"] <= conf_max)
-        & (~df_global["odd_min_aplicada"].isna())
-        & (df_global[col_odd] >= df_global["odd_min_aplicada"])
-    ]
-
-    # garantir que cada jogo conte uma vez
-    if "match_id" in df_estrategia.columns:
-        df_estrategia = df_estrategia.drop_duplicates(subset=["match_id", col_odd])
-    else:
-        df_estrategia = df_estrategia.drop_duplicates(subset=["match_date", col_odd])
-
-    roi_global, n_global, lucro_global = calcula_roi(df_estrategia["is_win"], df_estrategia[col_odd])
-    taxa_acerto = df_estrategia["is_win"].mean() * 100 if n_global > 0 else np.nan
-
-    resumo_global = {
-        "mercado": mercado,
-        "n_apostas": n_global,
-        "roi_global_%": roi_global,
-        "lucro_total": lucro_global,
-        "taxa_acerto_%": taxa_acerto,
-    }
-
-    return curva_df, resumo_global
+    return curva_df, None
 
 # ===== CORPO DA PÁGINA =====
 
@@ -571,7 +532,7 @@ if not df_filtered.empty:
 
     st.plotly_chart(fig, use_container_width=True, key="roi_barras_liga")
 
-    # ===== NOVA SEÇÃO: CURVA ÓTIMA ODD x CONFIANÇA =====
+    # ===== NOVA SEÇÃO: CURVA ÓTIMA ODD x CONFIANÇA (sem estratégia combinada) =====
     st.header("Curva Ótima de Odd mínima x Confiança (Goals 2.5)")
 
     col_roi, col_nmin = st.columns(2)
@@ -604,7 +565,7 @@ if not df_filtered.empty:
 
     with tabs[0]:
         st.subheader("Curva Ótima - Over 2.5")
-        curva_over, resumo_over = curva_otima_para_mercado(
+        curva_over, _ = curva_otima_para_mercado(
             df_filtered, "OVER", conf_min, conf_max, conf_step, roi_alvo, n_min
         )
 
@@ -627,21 +588,9 @@ if not df_filtered.empty:
             st.plotly_chart(fig_over_curve, use_container_width=True)
             st.dataframe(curva_over)
 
-        st.subheader("Estratégia combinada - Over 2.5")
-        if resumo_over is None or resumo_over["n_apostas"] == 0:
-            st.info(
-                "Nenhuma aposta seria feita pela estratégia combinada com esses parâmetros (Over 2.5)."
-            )
-        else:
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("N apostas", int(resumo_over["n_apostas"]))
-            col2.metric("ROI global (%)", f"{resumo_over['roi_global_%']:.2f}")
-            col3.metric("Lucro total (stake=1)", f"{resumo_over['lucro_total']:.2f}")
-            col4.metric("Taxa de acerto (%)", f"{resumo_over['taxa_acerto_%']:.2f}")
-
     with tabs[1]:
         st.subheader("Curva Ótima - Under 2.5")
-        curva_under, resumo_under = curva_otima_para_mercado(
+        curva_under, _ = curva_otima_para_mercado(
             df_filtered, "UNDER", conf_min, conf_max, conf_step, roi_alvo, n_min
         )
 
@@ -663,18 +612,6 @@ if not df_filtered.empty:
             )
             st.plotly_chart(fig_under_curve, use_container_width=True)
             st.dataframe(curva_under)
-
-        st.subheader("Estratégia combinada - Under 2.5")
-        if resumo_under is None or resumo_under["n_apostas"] == 0:
-            st.info(
-                "Nenhuma aposta seria feita pela estratégia combinada com esses parâmetros (Under 2.5)."
-            )
-        else:
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("N apostas", int(resumo_under["n_apostas"]))
-            col2.metric("ROI global (%)", f"{resumo_under['roi_global_%']:.2f}")
-            col3.metric("Lucro total (stake=1)", f"{resumo_under['lucro_total']:.2f}")
-            col4.metric("Taxa de acerto (%)", f"{resumo_under['taxa_acerto_%']:.2f}")
 
 else:
     st.info("Nenhum dado disponível para análise de ROI.")
