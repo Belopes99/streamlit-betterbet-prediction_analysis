@@ -235,16 +235,20 @@ def analisar_conf_odd_matriz(df, tipo="over"):
                     "roi": round(roi, 2) if n_apostas > 0 else np.nan,
                 }
             )
+
     df_long = pd.DataFrame(linhas)
-    matriz_roi = df_long.pivot(index="conf_min", columns="odd_min", values="roi")
-    matriz_n = df_long.pivot(index="conf_min", columns="odd_min", values="n")
+
     df_long["roi_n"] = np.where(
         df_long["n"] > 0,
         df_long["roi"].astype(str) + "% (" + df_long["n"].astype(str) + ")",
         "N/A",
     )
+
+    matriz_roi = df_long.pivot(index="conf_min", columns="odd_min", values="roi")
+    matriz_n = df_long.pivot(index="conf_min", columns="odd_min", values="n")
     matriz_roi_n = df_long.pivot(index="conf_min", columns="odd_min", values="roi_n")
-    return matriz_roi, matriz_n, matriz_roi_n
+
+    return matriz_roi, matriz_n, matriz_roi_n, df_long
 
 def plot_heatmap_text(matriz_z, matriz_text, titulo):
     st.subheader(titulo)
@@ -325,92 +329,49 @@ def calcular_roi_por_liga(df_liga):
     )
     return ganhos.sum() / len(df_liga) * 100
 
-# ===== FUNÇÕES CURVA ÓTIMA ALINHADAS COM A MATRIZ =====
+# ===== CURVA ÓTIMA (DERIVADA DO GRID DA MATRIZ) =====
 
-def calcula_roi(series_result, series_odds, stake=1.0):
-    n = len(series_result)
-    if n == 0:
-        return np.nan, 0, 0.0
-    ganhos = (series_result == 1).astype(int)
-    lucro = (ganhos * (series_odds - 1) - (1 - ganhos) * 1) * stake
-    total_stake = n * stake
-    roi = lucro.sum() / total_stake * 100.0
-    return roi, n, lucro.sum()
-
-def curva_otima_para_mercado(
-    df_base,
-    mercado: str,
-    conf_min_slider: float,
-    conf_max_slider: float,
-    conf_step: float,
+def curva_otima_from_grid(
+    df_grid: pd.DataFrame,
     roi_alvo: float,
     n_min: int,
-):
-    """
-    Usa exatamente o mesmo grid e filtros da matriz:
-    - Over: prob >= conf_thr e odd_over >= odd_min
-    - Under: prob <= conf_thr e odd_under >= odd_min
-    """
-    df = df_base.copy()
+    conf_min: float,
+    conf_max: float,
+) -> pd.DataFrame:
+    dfg = df_grid.copy()
 
-    if mercado == "OVER":
-        col_odd = "odd_goals_over_2_5"
-        cond_win = df["result"].astype(str).str.upper().str.strip() == "OVER"
-        faixas_conf = np.arange(0.50, 1.01, 0.01)
-    else:
-        col_odd = "odd_goals_under_2_5"
-        cond_win = df["result"].astype(str).str.upper().str.strip() == "UNDER"
-        faixas_conf = np.arange(0.50, -0.01, -0.05)
+    dfg = dfg[
+        (dfg["conf_min"] >= conf_min)
+        & (dfg["conf_min"] <= conf_max)
+        & (dfg["n"] >= n_min)
+        & (dfg["roi"] >= roi_alvo)
+    ].copy()
 
-    df["is_win"] = cond_win.astype(int)
+    if dfg.empty:
+        return pd.DataFrame(columns=["conf_thr", "odd_min_otima", "roi_%", "n_apostas"])
 
-    # limitar faixas_conf ao intervalo selecionado no slider
-    faixas_conf = faixas_conf[(faixas_conf >= conf_min_slider) & (faixas_conf <= conf_max_slider)]
+    dfg = dfg.sort_values(["conf_min", "odd_min"], ascending=[True, True])
 
-    faixas_odd = np.arange(1.10, 2.21, 0.01)
+    curva = (
+        dfg.groupby("conf_min", as_index=False)
+        .first()[["conf_min", "odd_min", "roi", "n"]]
+        .rename(
+            columns={
+                "conf_min": "conf_thr",
+                "odd_min": "odd_min_otima",
+                "roi": "roi_%",
+                "n": "n_apostas",
+            }
+        )
+    )
 
-    registros = []
-
-    for conf_thr in faixas_conf:
-        melhor_odd = None
-        melhor_roi = None
-        melhor_n = None
-
-        for odd_min in faixas_odd:
-            if mercado == "OVER":
-                df_sel = df[(df["probability"] >= conf_thr) & (df[col_odd] >= odd_min)]
-            else:
-                df_sel = df[(df["probability"] <= conf_thr) & (df[col_odd] >= odd_min)]
-
-            roi, n, _ = calcula_roi(df_sel["is_win"], df_sel[col_odd])
-
-            if np.isnan(roi) or n < n_min or roi < roi_alvo:
-                continue
-
-            melhor_odd = odd_min
-            melhor_roi = roi
-            melhor_n = n
-            break  # menor odd_min que bate o alvo para essa confiança
-
-        if melhor_odd is not None:
-            registros.append(
-                {
-                    "mercado": mercado,
-                    "conf_thr": round(conf_thr, 3),
-                    "odd_min_otima": round(melhor_odd, 3),
-                    "roi_%": melhor_roi,
-                    "n_apostas": melhor_n,
-                }
-            )
-
-    curva_df = pd.DataFrame(registros)
-    return curva_df, None
+    return curva
 
 # ===== CORPO DA PÁGINA =====
 
 if not df_filtered.empty:
-    matriz_roi_over, matriz_n_over, matriz_roi_n_over = analisar_conf_odd_matriz(df_filtered, tipo="over")
-    matriz_roi_under, matriz_n_under, matriz_roi_n_under = analisar_conf_odd_matriz(df_filtered, tipo="under")
+    matriz_roi_over, matriz_n_over, matriz_roi_n_over, grid_over = analisar_conf_odd_matriz(df_filtered, tipo="over")
+    matriz_roi_under, matriz_n_under, matriz_roi_n_under, grid_under = analisar_conf_odd_matriz(df_filtered, tipo="under")
 
     plot_heatmap_text(
         matriz_roi_over,
@@ -528,7 +489,7 @@ if not df_filtered.empty:
 
     st.plotly_chart(fig, use_container_width=True, key="roi_barras_liga")
 
-    # ===== NOVA SEÇÃO: CURVA ÓTIMA ODD x CONFIANÇA (alinhada com a matriz) =====
+    # ===== NOVA SEÇÃO: CURVA ÓTIMA ODD x CONFIANÇA (derivada da matriz) =====
     st.header("Curva Ótima de Odd mínima x Confiança (Goals 2.5)")
 
     col_roi, col_nmin = st.columns(2)
@@ -551,7 +512,6 @@ if not df_filtered.empty:
 
     conf_min = float(probability_range[0])
     conf_max = float(probability_range[1])
-    conf_step = 0.01
 
     st.caption(
         f"Usando confiança mínima {conf_min:.2f} e máxima {conf_max:.2f} (do filtro de probability da barra lateral)."
@@ -561,14 +521,10 @@ if not df_filtered.empty:
 
     with tabs[0]:
         st.subheader("Curva Ótima - Over 2.5")
-        curva_over, _ = curva_otima_para_mercado(
-            df_filtered, "OVER", conf_min, conf_max, conf_step, roi_alvo, n_min
-        )
+        curva_over = curva_otima_from_grid(grid_over, roi_alvo, int(n_min), conf_min, conf_max)
 
         if curva_over.empty:
-            st.warning(
-                "Nenhum ponto da curva atinge o ROI alvo com esse N mínimo para Over 2.5."
-            )
+            st.warning("Nenhum ponto da curva atinge o ROI alvo com esse N mínimo para Over 2.5.")
         else:
             fig_over_curve = px.line(
                 curva_over,
@@ -586,14 +542,10 @@ if not df_filtered.empty:
 
     with tabs[1]:
         st.subheader("Curva Ótima - Under 2.5")
-        curva_under, _ = curva_otima_para_mercado(
-            df_filtered, "UNDER", conf_min, conf_max, conf_step, roi_alvo, n_min
-        )
+        curva_under = curva_otima_from_grid(grid_under, roi_alvo, int(n_min), conf_min, conf_max)
 
         if curva_under.empty:
-            st.warning(
-                "Nenhum ponto da curva atinge o ROI alvo com esse N mínimo para Under 2.5."
-            )
+            st.warning("Nenhum ponto da curva atinge o ROI alvo com esse N mínimo para Under 2.5.")
         else:
             fig_under_curve = px.line(
                 curva_under,
