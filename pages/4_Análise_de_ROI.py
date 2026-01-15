@@ -188,10 +188,13 @@ def analisar_conf_odd_matriz(df, tipo="over"):
     odd_over_col = "odd_goals_over_2_5"
     odd_under_col = "odd_goals_under_2_5"
 
+    # Panorama completo:
+    # - Over: conf_min de 0.00 a 1.00 (prob >= conf_min)
+    # - Under: conf_min de 1.00 a 0.00 (prob <= conf_min)
     if tipo == "over":
-        faixas_conf = np.arange(0.50, 1.01, 0.01)
+        faixas_conf = np.arange(0.00, 1.01, 0.01)
     else:
-        faixas_conf = np.arange(0.50, -0.01, -0.05)
+        faixas_conf = np.arange(1.00, -0.01, -0.01)
 
     faixas_odd = np.arange(1.10, 2.21, 0.01)
     linhas = []
@@ -228,11 +231,11 @@ def analisar_conf_odd_matriz(df, tipo="over"):
 
             linhas.append(
                 {
-                    "conf_min": round(thr_conf, 3),
-                    "odd_min": round(thr_odd, 3),
-                    "n": n_apostas,
-                    "acc": round(taxa, 2) if n_apostas > 0 else np.nan,
-                    "roi": round(roi, 2) if n_apostas > 0 else np.nan,
+                    "conf_min": round(float(thr_conf), 3),
+                    "odd_min": round(float(thr_odd), 3),
+                    "n": int(n_apostas),
+                    "acc": round(float(taxa), 2) if n_apostas > 0 else np.nan,
+                    "roi": round(float(roi), 2) if n_apostas > 0 else np.nan,
                 }
             )
 
@@ -489,7 +492,7 @@ if not df_filtered.empty:
 
     st.plotly_chart(fig, use_container_width=True, key="roi_barras_liga")
 
-    # ===== NOVA SEÇÃO: CURVA ÓTIMA ODD x CONFIANÇA (derivada da matriz) =====
+    # ===== CURVA ÓTIMA ODD x CONFIANÇA (derivada da matriz) =====
     st.header("Curva Ótima de Odd mínima x Confiança (Goals 2.5)")
 
     col_roi, col_nmin = st.columns(2)
