@@ -325,7 +325,7 @@ def calcular_roi_por_liga(df_liga):
     )
     return ganhos.sum() / len(df_liga) * 100
 
-# ===== FUNÇÕES CURVA ÓTIMA (SEM ESTRATÉGIA COMBINADA) =====
+# ===== FUNÇÕES CURVA ÓTIMA ALINHADAS COM A MATRIZ =====
 
 def calcula_roi(series_result, series_odds, stake=1.0):
     n = len(series_result)
@@ -340,68 +340,64 @@ def calcula_roi(series_result, series_odds, stake=1.0):
 def curva_otima_para_mercado(
     df_base,
     mercado: str,
-    conf_min: float,
-    conf_max: float,
+    conf_min_slider: float,
+    conf_max_slider: float,
     conf_step: float,
     roi_alvo: float,
     n_min: int,
 ):
+    """
+    Usa exatamente o mesmo grid e filtros da matriz:
+    - Over: prob >= conf_thr e odd_over >= odd_min
+    - Under: prob <= conf_thr e odd_under >= odd_min
+    """
     df = df_base.copy()
 
     if mercado == "OVER":
         col_odd = "odd_goals_over_2_5"
         cond_win = df["result"].astype(str).str.upper().str.strip() == "OVER"
-        conf_mercado = df["probability"]
+        faixas_conf = np.arange(0.50, 1.01, 0.01)
     else:
         col_odd = "odd_goals_under_2_5"
         cond_win = df["result"].astype(str).str.upper().str.strip() == "UNDER"
-        conf_mercado = 1.0 - df["probability"]
+        faixas_conf = np.arange(0.50, -0.01, -0.05)
 
     df["is_win"] = cond_win.astype(int)
-    df["conf_mercado"] = conf_mercado
 
-    # confs sempre com 2 casas (0.51, 0.52, ...)
-    conf_start = np.ceil(conf_min * 100) / 100
-    conf_end = np.floor(conf_max * 100) / 100
-    conf_values = np.round(np.arange(conf_start, conf_end + 1e-9, conf_step), 2)
+    # limitar faixas_conf ao intervalo selecionado no slider
+    faixas_conf = faixas_conf[(faixas_conf >= conf_min_slider) & (faixas_conf <= conf_max_slider)]
 
-    odds_validas = df[col_odd].dropna()
-    if odds_validas.empty:
-        return pd.DataFrame(), None
-
-    odd_min_global = float(odds_validas.min())
-    odd_max_global = float(odds_validas.max())
-    # grid de odd de 0.1 em 0.1
-    odd_grid = np.round(np.arange(odd_min_global, odd_max_global + 1e-9, 0.10), 2)
+    faixas_odd = np.arange(1.10, 2.21, 0.01)
 
     registros = []
 
-    for conf_thr in conf_values:
-        df_conf = df[df["conf_mercado"] >= conf_thr].copy()
-        if df_conf.empty:
-            continue
-
+    for conf_thr in faixas_conf:
         melhor_odd = None
         melhor_roi = None
         melhor_n = None
 
-        for odd_min in odd_grid:
-            df_sel = df_conf[df_conf[col_odd] >= odd_min]
+        for odd_min in faixas_odd:
+            if mercado == "OVER":
+                df_sel = df[(df["probability"] >= conf_thr) & (df[col_odd] >= odd_min)]
+            else:
+                df_sel = df[(df["probability"] <= conf_thr) & (df[col_odd] >= odd_min)]
+
             roi, n, _ = calcula_roi(df_sel["is_win"], df_sel[col_odd])
-            if np.isnan(roi) or n < n_min:
+
+            if np.isnan(roi) or n < n_min or roi < roi_alvo:
                 continue
-            if roi >= roi_alvo:
-                melhor_odd = odd_min
-                melhor_roi = roi
-                melhor_n = n
-                break
+
+            melhor_odd = odd_min
+            melhor_roi = roi
+            melhor_n = n
+            break  # menor odd_min que bate o alvo para essa confiança
 
         if melhor_odd is not None:
             registros.append(
                 {
                     "mercado": mercado,
-                    "conf_thr": conf_thr,
-                    "odd_min_otima": melhor_odd,
+                    "conf_thr": round(conf_thr, 3),
+                    "odd_min_otima": round(melhor_odd, 3),
                     "roi_%": melhor_roi,
                     "n_apostas": melhor_n,
                 }
@@ -532,7 +528,7 @@ if not df_filtered.empty:
 
     st.plotly_chart(fig, use_container_width=True, key="roi_barras_liga")
 
-    # ===== NOVA SEÇÃO: CURVA ÓTIMA ODD x CONFIANÇA (sem estratégia combinada) =====
+    # ===== NOVA SEÇÃO: CURVA ÓTIMA ODD x CONFIANÇA (alinhada com a matriz) =====
     st.header("Curva Ótima de Odd mínima x Confiança (Goals 2.5)")
 
     col_roi, col_nmin = st.columns(2)
