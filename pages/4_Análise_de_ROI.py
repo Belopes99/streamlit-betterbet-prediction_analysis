@@ -321,6 +321,125 @@ def curva_otima_from_grid(
     return curva
 
 
+def _ensure_match_key(df_in: pd.DataFrame) -> pd.Series:
+    # Se existir algum id real no schema, preferimos
+    for c in ["match_id", "fixture_id", "game_id", "id"]:
+        if c in df_in.columns:
+            return df_in[c].astype(str)
+
+    # Fallback robusto
+    cols = []
+    for c in ["match_date", "league_name", "home_team", "away_team"]:
+        if c in df_in.columns:
+            cols.append(c)
+
+    if len(cols) >= 2:
+        return df_in[cols].astype(str).agg("|".join, axis=1)
+
+    return df_in.index.astype(str)
+
+
+def avaliar_execucao_curva_unica(
+    df_base: pd.DataFrame,
+    curva_df: pd.DataFrame,
+    mercado: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Simula apostar em TODAS as partidas que passam na policy derivada da curva,
+    garantindo que cada partida conte no máximo 1 vez.
+
+    mercado: "OVER" ou "UNDER"
+    """
+    if curva_df is None or curva_df.empty:
+        resumo = pd.DataFrame([{
+            "mercado": mercado,
+            "n_apostas": 0,
+            "unidades": 0.0,
+            "roi_%": np.nan,
+            "hit_rate_%": np.nan,
+        }])
+        return resumo, pd.DataFrame()
+
+    df = df_base.copy()
+    df["result_norm"] = df["result"].astype(str).str.strip().str.lower()
+    df["match_key"] = _ensure_match_key(df)
+
+    if mercado == "OVER":
+        odd_col = "odd_goals_over_2_5"
+        df["is_win"] = (df["result_norm"] == "over").astype(int)
+    else:
+        odd_col = "odd_goals_under_2_5"
+        df["is_win"] = (df["result_norm"] == "under").astype(int)
+
+    # Curva ordenada para merge_asof
+    curva = curva_df.copy()
+    curva["conf_thr"] = curva["conf_thr"].astype(float)
+    curva["odd_min_otima"] = curva["odd_min_otima"].astype(float)
+    curva = curva.sort_values("conf_thr")
+
+    # Base ordenada por probabilidade para merge_asof
+    base = df[["match_key", "probability", odd_col, "is_win"]].copy()
+    base = base.sort_values("probability")
+
+    if mercado == "OVER":
+        # Seleciona o maior conf_thr <= prob
+        base = pd.merge_asof(
+            base,
+            curva[["conf_thr", "odd_min_otima", "roi_%", "n_apostas"]].sort_values("conf_thr"),
+            left_on="probability",
+            right_on="conf_thr",
+            direction="backward",
+            allow_exact_matches=True,
+        )
+    else:
+        # UNDER: conf_thr é teto (prob <= conf_thr) => menor conf_thr >= prob
+        base = pd.merge_asof(
+            base,
+            curva[["conf_thr", "odd_min_otima", "roi_%", "n_apostas"]].sort_values("conf_thr"),
+            left_on="probability",
+            right_on="conf_thr",
+            direction="forward",
+            allow_exact_matches=True,
+        )
+
+    # Fora do range da curva -> sem ponto aplicável
+    base = base[base["odd_min_otima"].notna()].copy()
+
+    # Aplica regra final da odd ótima
+    base["odd_usada"] = base[odd_col]
+    base = base[base["odd_usada"] >= base["odd_min_otima"]].copy()
+
+    # Garantia extra de 1 linha por partida
+    base = base.sort_values(["match_key", "conf_thr"], ascending=[True, False]).drop_duplicates("match_key")
+
+    # Lucro (stake 1)
+    base["lucro_unidades"] = np.where(base["is_win"] == 1, base["odd_usada"] - 1.0, -1.0)
+
+    n = len(base)
+    unidades = float(base["lucro_unidades"].sum()) if n > 0 else 0.0
+    roi = (unidades / n * 100.0) if n > 0 else np.nan
+    hit = (base["is_win"].mean() * 100.0) if n > 0 else np.nan
+
+    resumo = pd.DataFrame([{
+        "mercado": mercado,
+        "n_apostas": int(n),
+        "unidades": round(unidades, 2),
+        "roi_%": round(roi, 2) if n > 0 else np.nan,
+        "hit_rate_%": round(hit, 2) if n > 0 else np.nan,
+    }])
+
+    # enriquecer p/ inspeção
+    base = base.rename(columns={
+        "probability": "prob_over",
+        "conf_thr": "conf_thr_aplicado",
+        "odd_min_otima": "odd_min_otima_aplicada",
+        "odd_usada": "odd_usada_no_jogo",
+        "is_win": "win",
+    })
+
+    return resumo, base
+
+
 # ===== CORPO DA PÁGINA =====
 
 if not df_filtered.empty:
@@ -454,6 +573,12 @@ if not df_filtered.empty:
             st.plotly_chart(fig_over_curve, use_container_width=True)
             st.dataframe(curva_over)
 
+            st.subheader("Resultado agregando TODAS as apostas da curva (sem duplicar partidas)")
+            resumo_over, apostas_over = avaliar_execucao_curva_unica(df_filtered, curva_over, "OVER")
+            st.dataframe(resumo_over)
+            st.caption("Apostas efetivamente selecionadas (cada partida aparece no máximo 1 vez).")
+            st.dataframe(apostas_over)
+
     with tabs[1]:
         st.subheader("Curva Ótima - Under 2.5")
         curva_under = curva_otima_from_grid(grid_under, roi_alvo, int(n_min), conf_min, conf_max)
@@ -474,6 +599,12 @@ if not df_filtered.empty:
             )
             st.plotly_chart(fig_under_curve, use_container_width=True)
             st.dataframe(curva_under)
+
+            st.subheader("Resultado agregando TODAS as apostas da curva (sem duplicar partidas)")
+            resumo_under, apostas_under = avaliar_execucao_curva_unica(df_filtered, curva_under, "UNDER")
+            st.dataframe(resumo_under)
+            st.caption("Apostas efetivamente selecionadas (cada partida aparece no máximo 1 vez).")
+            st.dataframe(apostas_under)
 
 else:
     st.info("Nenhum dado disponível para análise de ROI.")
