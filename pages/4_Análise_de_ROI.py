@@ -15,6 +15,16 @@ client = bigquery.Client(credentials=credentials, project=project_id)
 
 st.title("Análise de ROI")
 
+tmp = df_base.copy()
+tmp["result_norm"] = tmp["result"].astype(str).str.strip().str.lower()
+
+st.write("Distribuição de result_norm (top 20):")
+st.dataframe(tmp["result_norm"].value_counts().head(20))
+
+st.write("Linhas com result_norm fora de {'over','under'}:")
+st.dataframe(tmp.loc[~tmp["result_norm"].isin(["over","under"]), ["result", "result_norm"]].head(50))
+
+
 QUERY = """
 SELECT *
 FROM `betterbet-467621.betterbet.predictions`
