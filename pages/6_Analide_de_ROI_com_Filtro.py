@@ -358,14 +358,28 @@ def curva_otima_from_grid(
     conf_min: float,
     conf_max: float,
 ) -> pd.DataFrame:
-    dfg = df_grid.copy()
-    # ensure same rounding convention as matrix indices
-    conf_min = float(np.round(conf_min, 2))
-    conf_max = float(np.round(conf_max, 2))
+    """
+    Curva ótima consistente com a matriz (conf/odd quantizados em 2 casas).
+    - Over: conf_thr é mínimo (prob >= conf_thr)
+    - Under: conf_thr é 'teto' de prob OVER (prob <= conf_thr)
+    """
 
+    if df_grid is None or df_grid.empty:
+        return pd.DataFrame(columns=["conf_thr", "odd_min_otima", "roi_%", "n_apostas"])
+
+    dfg = df_grid.copy()
+
+    # Quantização EXATA (evita float drift)
+    dfg["conf_i"] = (dfg["conf_min"].round(2) * 100).round().astype(int)
+    dfg["odd_i"] = (dfg["odd_min"].round(2) * 100).round().astype(int)
+
+    conf_min_i = int(round(round(conf_min, 2) * 100))
+    conf_max_i = int(round(round(conf_max, 2) * 100))
+
+    # Filtros da curva
     dfg = dfg[
-        (dfg["conf_min"] >= conf_min)
-        & (dfg["conf_min"] <= conf_max)
+        (dfg["conf_i"] >= conf_min_i)
+        & (dfg["conf_i"] <= conf_max_i)
         & (dfg["n"] >= int(n_min))
         & (dfg["roi"] >= float(roi_alvo))
     ].copy()
@@ -373,20 +387,27 @@ def curva_otima_from_grid(
     if dfg.empty:
         return pd.DataFrame(columns=["conf_thr", "odd_min_otima", "roi_%", "n_apostas"])
 
-    dfg = dfg.sort_values(["conf_min", "odd_min"], ascending=[True, True])
+    # Critério de "ótimo": menor odd que atinge o ROI alvo para cada confiança
+    dfg = dfg.sort_values(["conf_i", "odd_i"], ascending=[True, True])
 
     curva = (
-        dfg.groupby("conf_min", as_index=False)
-        .first()[["conf_min", "odd_min", "roi", "n"]]
+        dfg.groupby("conf_i", as_index=False)
+        .first()[["conf_i", "odd_i", "roi", "n"]]
         .rename(
             columns={
-                "conf_min": "conf_thr",
-                "odd_min": "odd_min_otima",
+                "conf_i": "conf_thr_i",
+                "odd_i": "odd_min_otima_i",
                 "roi": "roi_%",
                 "n": "n_apostas",
             }
         )
     )
+
+    curva["conf_thr"] = (curva["conf_thr_i"] / 100.0).round(2)
+    curva["odd_min_otima"] = (curva["odd_min_otima_i"] / 100.0).round(2)
+
+    curva = curva[["conf_thr", "odd_min_otima", "roi_%", "n_apostas"]].sort_values("conf_thr")
+
     return curva
 
 def _calc_roi_from_manual_filter(df_in: pd.DataFrame, mercado: str, conf_min: float, conf_max: float, odd_min: float):
