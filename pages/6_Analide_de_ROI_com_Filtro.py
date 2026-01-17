@@ -457,26 +457,49 @@ tabs_busca = st.tabs(["Over 2.5", "Under 2.5"])
 
 def _filtrar_grid_para_busca(df_grid: pd.DataFrame, mercado: str) -> pd.DataFrame:
     if df_grid is None or df_grid.empty:
-        return pd.DataFrame(columns=["conf_min", "odd_min", "roi", "n", "lucro_u"])
+        return pd.DataFrame(columns=["conf_thr", "odd_min_ref", "roi_%", "n_apostas", "lucro_u"])
 
     dfg = df_grid.copy()
 
     # aplica ROI/N mínimos
-    dfg = dfg[(dfg["n"] >= int(n_min_busca)) & (dfg["roi"].notna()) & (dfg["roi"] >= float(roi_min_busca))].copy()
+    dfg = dfg[
+        (dfg["n"] >= int(n_min_busca))
+        & (dfg["roi"].notna())
+        & (dfg["roi"] >= float(roi_min_busca))
+    ].copy()
 
     # aplica faixa de confiança global (sidebar)
     conf_min_slider = float(np.round(probability_range[0], 2))
     conf_max_slider = float(np.round(probability_range[1], 2))
     dfg = dfg[(dfg["conf_min"] >= conf_min_slider) & (dfg["conf_min"] <= conf_max_slider)].copy()
 
-    # aplica faixa de odd do mercado (sidebar) — verdade = matriz construída em df_over/df_under já filtrados,
-    # mas reforçamos aqui para ficar explícito.
+    # aplica faixa de odd do mercado (sidebar)
     if mercado == "over":
-        dfg = dfg[(dfg["odd_min"] >= float(np.round(odd_over_range[0], 2))) & (dfg["odd_min"] <= float(np.round(odd_over_range[1], 2)))].copy()
+        odd_lo = float(np.round(odd_over_range[0], 2))
+        odd_hi = float(np.round(odd_over_range[1], 2))
     else:
-        dfg = dfg[(dfg["odd_min"] >= float(np.round(odd_under_range[0], 2))) & (dfg["odd_min"] <= float(np.round(odd_under_range[1], 2)))].copy()
+        odd_lo = float(np.round(odd_under_range[0], 2))
+        odd_hi = float(np.round(odd_under_range[1], 2))
 
-    # ordenação
+    dfg = dfg[(dfg["odd_min"] >= odd_lo) & (dfg["odd_min"] <= odd_hi)].copy()
+
+    if dfg.empty:
+        return pd.DataFrame(columns=["conf_thr", "odd_min_ref", "roi_%", "n_apostas", "lucro_u"])
+
+    # =========================
+    # ✅ REMOVE REDUNDÂNCIAS:
+    # Para cada conf_min, manter apenas a MENOR odd_min que passa (a "fronteira mínima")
+    # =========================
+    # Ordena para garantir que o primeiro do grupo seja a menor odd.
+    # Em empate de odd, prefere maior ROI, depois maior lucro, depois maior N.
+    dfg = dfg.sort_values(
+        ["conf_min", "odd_min", "roi", "lucro_u", "n"],
+        ascending=[True, True, False, False, False],
+    )
+
+    dfg = dfg.groupby("conf_min", as_index=False).first().copy()
+
+    # Agora ordenação final de exibição
     if ordem == "Maior ROI":
         dfg = dfg.sort_values(["roi", "n"], ascending=[False, False])
     elif ordem == "Maior lucro (u)":
@@ -493,11 +516,18 @@ def _filtrar_grid_para_busca(df_grid: pd.DataFrame, mercado: str) -> pd.DataFram
         dfg = dfg.sort_values(["conf_min", "roi"], ascending=[True, False])
 
     # formato final
-    dfg = dfg.rename(columns={"conf_min": "conf_thr", "odd_min": "odd_min_ref", "n": "n_apostas", "roi": "roi_%"})
+    dfg = dfg.rename(
+        columns={
+            "conf_min": "conf_thr",
+            "odd_min": "odd_min_ref",
+            "n": "n_apostas",
+            "roi": "roi_%",
+        }
+    )
     dfg = dfg[["conf_thr", "odd_min_ref", "roi_%", "n_apostas", "lucro_u"]].head(int(top_k)).copy()
 
     return dfg
-
+    
 with tabs_busca[0]:
     st.subheader("Cenários (Over) que passam ROI mínimo e N mínimo")
     tabela_over = _filtrar_grid_para_busca(grid_over, mercado="over")
