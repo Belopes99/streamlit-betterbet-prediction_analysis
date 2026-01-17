@@ -189,7 +189,7 @@ if df_base.empty:
     st.info("Nenhum dado disponível para análise de ROI (após filtros globais).")
     st.stop()
 
-# Drop NAs (as you requested) – we will also report how many were excluded
+# Drop NAs – report how many were excluded
 needed_cols = ["probability", "result", "match_date", "odd_goals_over_2_5", "odd_goals_under_2_5"]
 missing_cols = [c for c in needed_cols if c not in df_base.columns]
 if missing_cols:
@@ -202,7 +202,7 @@ na_date = int(df_base["match_date"].isna().sum())
 na_odd_over = int(df_base["odd_goals_over_2_5"].isna().sum())
 na_odd_under = int(df_base["odd_goals_under_2_5"].isna().sum())
 
-# We exclude NaNs in probability/result/date for any analysis
+# Exclude NaNs in probability/result/date for any analysis
 df_base = df_base.dropna(subset=["probability", "result", "match_date"]).copy()
 
 # Market-specific odds filters + exclude NaNs in that market odd
@@ -351,32 +351,49 @@ def calcular_roi_por_liga(df_liga: pd.DataFrame) -> float:
         return np.nan
     return float(ganhos.sum() / len(df_liga) * 100.0)
 
-def curva_otima_from_grid(
+# =========================
+# NEW: CURVA DE VIABILIDADE (NOT "ÓTIMA")
+# =========================
+def curva_viavel_from_grid(
     df_grid: pd.DataFrame,
     roi_alvo: float,
     n_min: int,
     conf_min: float,
     conf_max: float,
+    modo_fronteira: str = "min_odd",  # "min_odd" | "max_n" | "max_lucro"
 ) -> pd.DataFrame:
     """
-    Curva ótima consistente com a matriz (conf/odd quantizados em 2 casas).
-    - Over: conf_thr é mínimo (prob >= conf_thr)
-    - Under: conf_thr é 'teto' de prob OVER (prob <= conf_thr)
+    Curva de viabilidade (fronteira) derivada do grid:
+      - Mantém apenas pontos viáveis: roi >= roi_alvo e n >= n_min e conf dentro [conf_min, conf_max]
+      - Para cada conf, escolhe 1 ponto conforme modo_fronteira:
+          * min_odd   -> menor odd que passa (fronteira mais permissiva, tende a maior volume)
+          * max_n     -> maior N (mais estável)
+          * max_lucro -> maior lucro total (u)
+
+    Retorna colunas:
+      conf_thr, odd_min_ref, roi_%, n_apostas, lucro_u
     """
 
     if df_grid is None or df_grid.empty:
-        return pd.DataFrame(columns=["conf_thr", "odd_min_otima", "roi_%", "n_apostas"])
+        return pd.DataFrame(columns=["conf_thr", "odd_min_ref", "roi_%", "n_apostas", "lucro_u"])
 
     dfg = df_grid.copy()
 
-    # Quantização EXATA (evita float drift)
+    for col in ["conf_min", "odd_min", "roi", "n"]:
+        if col not in dfg.columns:
+            raise ValueError(f"df_grid precisa ter a coluna '{col}'")
+
+    dfg = dfg.dropna(subset=["conf_min", "odd_min", "roi", "n"]).copy()
+    dfg["roi"] = dfg["roi"].astype(float)
+    dfg["n"] = dfg["n"].astype(int)
+
+    # Quantização consistente (centésimos)
     dfg["conf_i"] = (dfg["conf_min"].round(2) * 100).round().astype(int)
     dfg["odd_i"] = (dfg["odd_min"].round(2) * 100).round().astype(int)
 
     conf_min_i = int(round(round(conf_min, 2) * 100))
     conf_max_i = int(round(round(conf_max, 2) * 100))
 
-    # Filtros da curva
     dfg = dfg[
         (dfg["conf_i"] >= conf_min_i)
         & (dfg["conf_i"] <= conf_max_i)
@@ -385,36 +402,43 @@ def curva_otima_from_grid(
     ].copy()
 
     if dfg.empty:
-        return pd.DataFrame(columns=["conf_thr", "odd_min_otima", "roi_%", "n_apostas"])
+        return pd.DataFrame(columns=["conf_thr", "odd_min_ref", "roi_%", "n_apostas", "lucro_u"])
 
-    # Critério de "ótimo": menor odd que atinge o ROI alvo para cada confiança
-    dfg = dfg.sort_values(["conf_i", "odd_i"], ascending=[True, True])
+    # Lucro total (u) do ponto
+    dfg["lucro_u"] = (dfg["roi"] / 100.0) * dfg["n"]
+
+    if modo_fronteira == "min_odd":
+        # menor odd; desempate: maior N; depois maior ROI
+        dfg = dfg.sort_values(["conf_i", "odd_i", "n", "roi"], ascending=[True, True, False, False])
+    elif modo_fronteira == "max_n":
+        # maior N; desempate: menor odd; depois maior ROI
+        dfg = dfg.sort_values(["conf_i", "n", "odd_i", "roi"], ascending=[True, False, True, False])
+    elif modo_fronteira == "max_lucro":
+        # maior lucro; desempate: menor odd; depois maior ROI
+        dfg = dfg.sort_values(["conf_i", "lucro_u", "odd_i", "roi"], ascending=[True, False, True, False])
+    else:
+        raise ValueError("modo_fronteira inválido: use 'min_odd', 'max_n' ou 'max_lucro'")
 
     curva = (
         dfg.groupby("conf_i", as_index=False)
-        .first()[["conf_i", "odd_i", "roi", "n"]]
-        .rename(
-            columns={
-                "conf_i": "conf_thr_i",
-                "odd_i": "odd_min_otima_i",
-                "roi": "roi_%",
-                "n": "n_apostas",
-            }
-        )
+        .first()[["conf_i", "odd_i", "roi", "n", "lucro_u"]]
+        .rename(columns={"roi": "roi_%", "n": "n_apostas"})
     )
 
-    curva["conf_thr"] = (curva["conf_thr_i"] / 100.0).round(2)
-    curva["odd_min_otima"] = (curva["odd_min_otima_i"] / 100.0).round(2)
+    curva["conf_thr"] = (curva["conf_i"] / 100.0).round(2)
+    curva["odd_min_ref"] = (curva["odd_i"] / 100.0).round(2)
 
-    curva = curva[["conf_thr", "odd_min_otima", "roi_%", "n_apostas"]].sort_values("conf_thr")
-
+    curva = curva[["conf_thr", "odd_min_ref", "roi_%", "n_apostas", "lucro_u"]].sort_values("conf_thr")
     return curva
 
+# =========================
+# DEBUG HELPERS (unchanged)
+# =========================
 def _calc_roi_from_manual_filter(df_in: pd.DataFrame, mercado: str, conf_min: float, conf_max: float, odd_min: float):
     """
     Manual (weekly page) semantics:
     - OVER: probability in [conf_min, conf_max], odd_over >= odd_min
-    - UNDER (as used on your weekly page): probability_under in [conf_min, conf_max], odd_under >= odd_min
+    - UNDER: probability_under in [conf_min, conf_max], odd_under >= odd_min
       where probability_under = 1 - probability
     """
     df2 = df_in.copy()
@@ -500,7 +524,7 @@ if not df_under.empty:
 else:
     grid_under = pd.DataFrame(columns=["conf_min", "odd_min", "n", "roi"])
 
-# ROI & entries by league (use base global, but excluding NaNs in result/prob/date)
+# ROI & entries by league (use base global, excluding NaNs in prob/result/date)
 count_entradas = df_base.groupby("league_name")["probability"].count()
 roi_liga = df_base.groupby("league_name").apply(calcular_roi_por_liga)
 league_stats = pd.DataFrame({"N_entradas": count_entradas, "ROI_total": roi_liga}).reset_index()
@@ -561,55 +585,77 @@ fig.update_layout(
 st.plotly_chart(fig, use_container_width=True, key="roi_barras_liga")
 
 # =========================
-# CURVA ÓTIMA (from grid)
+# CURVA DE VIABILIDADE (from grid)
 # =========================
-st.header("Curva Ótima de Odd mínima x Confiança (Goals 2.5)")
+st.header("Curva de Viabilidade (Odd mínima x Confiança) — derivada da matriz")
 
-col_roi, col_nmin = st.columns(2)
+col_roi, col_nmin, col_mode = st.columns([1, 1, 1.4])
 with col_roi:
     roi_alvo = st.number_input(
-        "ROI alvo para a curva (%)",
+        "ROI mínimo (para entrar na curva) (%)",
         min_value=-100.0,
         max_value=200.0,
         value=10.0,
         step=1.0,
+        key="_roi_alvo_curve",
     )
 with col_nmin:
     n_min = st.number_input(
-        "N mínimo de entradas por ponto de confiança",
+        "N mínimo (para entrar na curva)",
         min_value=1,
         max_value=2000,
         value=10,
         step=1,
+        key="_n_min_curve",
     )
+with col_mode:
+    modo_fronteira = st.selectbox(
+        "Como escolher 1 ponto por confiança?",
+        options=[
+            ("min_odd", "Menor odd que passa (fronteira permissiva)"),
+            ("max_n", "Maior N que passa (mais estável)"),
+            ("max_lucro", "Maior lucro (u) que passa"),
+        ],
+        index=0,
+        format_func=lambda x: x[1],
+        key="_modo_fronteira_curve",
+    )[0]
 
 conf_min = float(probability_range[0])
 conf_max = float(probability_range[1])
 
 st.caption(
-    f"Usando confiança mínima {conf_min:.2f} e máxima {conf_max:.2f} (do filtro de probability da barra lateral)."
+    f"Usando conf na faixa [{conf_min:.2f}, {conf_max:.2f}] a partir do filtro de probability da sidebar. "
+    f"A curva é um filtro do grid: ROI ≥ {roi_alvo:.2f}% e N ≥ {int(n_min)}."
 )
 
 tabs = st.tabs(["Over 2.5", "Under 2.5"])
 
 with tabs[0]:
-    st.subheader("Curva Ótima - Over 2.5")
+    st.subheader("Curva de Viabilidade — Over 2.5")
     if df_over.empty:
         st.warning("Sem dados para Over após filtros globais + odd Over (e exclusão de NaNs).")
     else:
-        curva_over = curva_otima_from_grid(grid_over, float(roi_alvo), int(n_min), conf_min, conf_max)
+        curva_over = curva_viavel_from_grid(
+            grid_over,
+            roi_alvo=float(roi_alvo),
+            n_min=int(n_min),
+            conf_min=conf_min,
+            conf_max=conf_max,
+            modo_fronteira=modo_fronteira,
+        )
 
         if curva_over.empty:
-            st.warning("Nenhum ponto da curva atinge o ROI alvo com esse N mínimo para Over 2.5.")
+            st.warning("Nenhum ponto do grid atende ROI mínimo e N mínimo para Over 2.5.")
         else:
             fig_over_curve = px.line(
                 curva_over,
-                x="odd_min_otima",
+                x="odd_min_ref",
                 y="conf_thr",
                 markers=True,
             )
             fig_over_curve.update_layout(
-                xaxis_title="Odd mínima ótima",
+                xaxis_title="Odd mínima (referência da fronteira)",
                 yaxis_title="Confiança mínima (prob >= conf_thr)",
                 height=350,
             )
@@ -617,23 +663,30 @@ with tabs[0]:
             st.dataframe(curva_over)
 
 with tabs[1]:
-    st.subheader("Curva Ótima - Under 2.5")
+    st.subheader("Curva de Viabilidade — Under 2.5")
     if df_under.empty:
         st.warning("Sem dados para Under após filtros globais + odd Under (e exclusão de NaNs).")
     else:
-        curva_under = curva_otima_from_grid(grid_under, float(roi_alvo), int(n_min), conf_min, conf_max)
+        curva_under = curva_viavel_from_grid(
+            grid_under,
+            roi_alvo=float(roi_alvo),
+            n_min=int(n_min),
+            conf_min=conf_min,
+            conf_max=conf_max,
+            modo_fronteira=modo_fronteira,
+        )
 
         if curva_under.empty:
-            st.warning("Nenhum ponto da curva atinge o ROI alvo com esse N mínimo para Under 2.5.")
+            st.warning("Nenhum ponto do grid atende ROI mínimo e N mínimo para Under 2.5.")
         else:
             fig_under_curve = px.line(
                 curva_under,
-                x="odd_min_otima",
+                x="odd_min_ref",
                 y="conf_thr",
                 markers=True,
             )
             fig_under_curve.update_layout(
-                xaxis_title="Odd mínima ótima",
+                xaxis_title="Odd mínima (referência da fronteira)",
                 yaxis_title="Teto de prob. OVER (prob <= conf_thr)",
                 height=350,
             )
@@ -663,7 +716,6 @@ st.caption(
 )
 
 # Weekly-like, using df_base (same global filters) + excluding NaNs in both odds (to mimic 'eligible odds')
-# Important: weekly page currently doesn't apply sidebar odd ranges; here we compare strictly by the pair (conf,odd)
 weekly_df = df_base.dropna(subset=["odd_goals_over_2_5", "odd_goals_under_2_5"]).copy()
 
 weekly_metrics = _calc_roi_from_manual_filter(
@@ -678,8 +730,6 @@ weekly_metrics = _calc_roi_from_manual_filter(
 if dbg_mercado == "over":
     mat_metrics = _matrix_cell_metrics(df_over, tipo="over", conf_thr=dbg_conf, odd_thr=dbg_odd)
 else:
-    # For UNDER: to match weekly UNDER(conf_under >= 0.42), the equivalent cap on prob_over is <= (1 - 0.42) = 0.58
-    # However, the user input dbg_conf is "conf_min" and ambiguous; here we show BOTH interpretations.
     mat_metrics_cap = _matrix_cell_metrics(df_under, tipo="under", conf_thr=dbg_conf, odd_thr=dbg_odd)
     mat_metrics_equiv = _matrix_cell_metrics(df_under, tipo="under", conf_thr=float(np.round(1.0 - dbg_conf, 2)), odd_thr=dbg_odd)
 
@@ -710,7 +760,6 @@ candidate_keys = [c for c in ["prediction_id", "match_id", "fixture_id", "game_i
 if candidate_keys:
     key_col = candidate_keys[0]
 else:
-    # fallback composite key (best-effort)
     key_col = None
     weekly_metrics["df"]["__key__"] = (
         weekly_metrics["df"]["match_date"].astype(str) + " | " +
@@ -726,11 +775,11 @@ else:
             mat_metrics["df"].get("away_team", "").astype(str)
         )
     else:
-        mat_metrics_cap["df"]["__key__"] = (
-            mat_metrics_cap["df"]["match_date"].astype(str) + " | " +
-            mat_metrics_cap["df"].get("league_name", "").astype(str) + " | " +
-            mat_metrics_cap["df"].get("home_team", "").astype(str) + " vs " +
-            mat_metrics_cap["df"].get("away_team", "").astype(str)
+        mat_metrics_equiv["df"]["__key__"] = (
+            mat_metrics_equiv["df"]["match_date"].astype(str) + " | " +
+            mat_metrics_equiv["df"].get("league_name", "").astype(str) + " | " +
+            mat_metrics_equiv["df"].get("home_team", "").astype(str) + " vs " +
+            mat_metrics_equiv["df"].get("away_team", "").astype(str)
         )
     key_col = "__key__"
 
@@ -748,7 +797,6 @@ if dbg_mercado == "over":
     if only_matrix:
         st.dataframe(pd.DataFrame({"only_matrix": only_matrix}))
 else:
-    # Compare weekly-under with matrix-under EQUIVALENT threshold (most fair)
     w_keys = set(weekly_metrics["df"][key_col].astype(str).tolist())
     m_keys = set(mat_metrics_equiv["df"][key_col].astype(str).tolist())
 
